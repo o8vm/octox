@@ -1,0 +1,33 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "octox"
+description = "Unix like Operating System"
+authors = ["Hayato Ohhashi <o8@vmm.dev>"]
+edition = "2021"
+license.workspace = true
+version.workspace = true
+repository.workspace = true
+forced-target = "riscv64gc-unknown-none-elf"
+
+[workspace.package]
+version = "0.1.0"
+license = "MIT/Apache-2.0"
+repository = "https://github.com/o8vm/octox"
+
+[[bin]]
+name = "octox"
+path = "src/kernel/main.rs"
+
+[workspace]
+members = [
+    "src/kernel",
+    "src/mkfs",
+    "src/user",
+]
+
+[workspace.dependencies]
+libkernel = { path = "src/kernel", default-features = false }
+
+[dependencies]
+libkernel = { workspace = true, features = ["kernel"] }

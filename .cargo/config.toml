@@ -1,0 +1,8 @@
+[target.riscv64gc-unknown-none-elf]
+runner = """
+qemu-system-riscv64 -machine virt -bios none -m 524M -smp 4 -nographic \
+-serial mon:stdio -global virtio-mmio.force-legacy=false \
+-drive file=target/fs.img,if=none,format=raw,id=x0 \
+-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
+-kernel 
+"""

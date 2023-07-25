@@ -1,0 +1,15 @@
+[package]
+name = "mkfs"
+description = "mkfs octox file system"
+version.workspace = true
+authors = ["Hayato Ohhashi <o8@vmm.dev>"]
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "mkfs"
+path = "main.rs"
+
+[dependencies]
+libkernel = { workspace = true }

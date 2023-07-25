@@ -1,0 +1,3 @@
+# Required for rust-analyzer
+[build]
+target = "riscv64gc-unknown-none-elf"
