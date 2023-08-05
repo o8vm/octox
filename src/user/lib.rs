@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(lang_items, never_type, allocator_api, alloc_error_handler)]
 #![allow(clippy::missing_safety_doc)]
+#![allow(internal_features)]
 
 pub mod sys {
     use core::arch::asm;
