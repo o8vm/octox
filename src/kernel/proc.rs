@@ -668,6 +668,7 @@ pub fn scheduler() -> ! {
         // Avoid deadlock by ensuring thet devices can interrupt.
         intr_on();
 
+        let mut found : bool = false;
         for p in PROCS.pool.iter() {
             let mut inner = p.inner.lock();
             if inner.state == ProcState::RUNNABLE {
@@ -682,6 +683,16 @@ pub fn scheduler() -> ! {
                 // Process is done running for now.
                 // It should have changed its p->state before coming back.
                 c.proc.take();
+                found = true;
+            }
+        }
+         if found == false {
+            intr_on();
+            // If pool cycle ran without a process running... 
+            // ...park cpu until interrupt
+            // This prevents cpu from red-lining for no reason
+            unsafe {
+                asm!("wfi");
             }
         }
     }
