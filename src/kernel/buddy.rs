@@ -21,6 +21,7 @@ pub struct BuddyAllocator {
     nsize: usize,      // number of entries in self.sizes array
     sizes: Option<NonNull<[SzInfo]>>,
 }
+unsafe impl Send for BuddyAllocator {}
 
 // The allocator has SzInfo for each size k. Each SzInfo has a free
 // list, an array alloc to keep track which blocks have been

@@ -63,9 +63,9 @@ impl Cpus {
     // # Safety
     // interrupts must be disabled.
     #[allow(clippy::mut_from_ref)]
-    pub unsafe fn mycpu(&self) -> &mut Cpu {
+    pub unsafe fn mycpu(&self) -> *mut Cpu {
         let id = Self::cpu_id();
-        &mut *self.0[id].get()
+        self.0[id].get()
     }
 
     // Return the current proc pointer: Some(Arc<Proc>), or None if none.
@@ -73,7 +73,7 @@ impl Cpus {
         let _intr_lock = Self::lock_mycpu("withoutspin");
         let c;
         unsafe {
-            c = CPUS.mycpu();
+            c = &*CPUS.mycpu();
         }
         c.proc.clone()
     }
@@ -84,7 +84,7 @@ impl Cpus {
     pub fn lock_mycpu(name: &str) -> IntrLock {
         let old = intr_get();
         intr_off();
-        unsafe { CPUS.mycpu().locked(old, name) }
+        unsafe { (*CPUS.mycpu()).locked(old, name) }
     }
 }
 
@@ -103,14 +103,11 @@ impl Cpu {
 
     // if all `IntrLock`'s are dropped, interrupts may recover
     // to previous state.
-    // # Safety:
-    // interrupts must be disabled
-    unsafe fn locked(&mut self, old: bool, name: &str) -> IntrLock {
+    fn locked(&mut self, old: bool, _name: &str) -> IntrLock {
         if self.noff == 0 {
             self.intena = old;
         }
         self.noff += 1;
-        self.nest[(self.noff - 1) as usize] = &*(name as *const _);
         IntrLock
     }
 
@@ -132,7 +129,7 @@ pub struct IntrLock;
 
 impl Drop for IntrLock {
     fn drop(&mut self) {
-        unsafe { CPUS.mycpu().unlock() }
+        unsafe { (&mut *CPUS.mycpu()).unlock() }
     }
 }
 
@@ -675,13 +672,13 @@ pub fn scheduler() -> ! {
                 // to release its lock and then reacquire it
                 // before jumping back to us.
                 inner.state = ProcState::RUNNING;
-                c.proc.replace(Arc::clone(p));
                 unsafe {
-                    swtch(&mut c.context, &p.data().context);
+                    (*c).proc.replace(Arc::clone(p));
+                    swtch(&mut (*c).context, &p.data().context);
+                    // Process is done running for now.
+                    // It should have changed its p->state before coming back.
+                    (*c).proc.take();
                 }
-                // Process is done running for now.
-                // It should have changed its p->state before coming back.
-                c.proc.take();
             }
         }
     }
@@ -693,7 +690,7 @@ pub fn scheduler() -> ! {
 // kernel thread, not this CPU.
 fn sched<'a>(guard: MutexGuard<'a, ProcInner>, ctx: &mut Context) -> MutexGuard<'a, ProcInner> {
     unsafe {
-        let c = CPUS.mycpu();
+        let c = &mut *CPUS.mycpu();
         assert!(guard.holding(), "sched proc lock");
         assert!(
             c.noff == 1,

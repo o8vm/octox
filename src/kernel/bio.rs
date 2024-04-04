@@ -53,6 +53,7 @@ pub struct Lru {
     tail: Option<Weak<Buf>>,
     n: usize,
 }
+unsafe impl Send for Lru {}
 
 #[derive(Debug)]
 pub struct Buf {

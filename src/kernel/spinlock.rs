@@ -77,13 +77,11 @@ impl<T> Mutex<T> {
     pub unsafe fn force_unlock(&self) {
         assert!(self.holding(), "force unlock {}", self.name);
         self.locked.store(ptr::null_mut(), Ordering::Release);
-        CPUS.mycpu().unlock()
+        (&mut *CPUS.mycpu()).unlock()
     }
 }
 
-unsafe impl<T> Sync for Mutex<T> {}
-
-unsafe impl<T> Send for Mutex<T> {}
+unsafe impl<T: Send> Sync for Mutex<T> {}
 
 impl<'a, T: 'a> MutexGuard<'a, T> {
     // Returns a reference to the original 'Mutex' object.
@@ -116,3 +114,5 @@ impl<'a, T: 'a> DerefMut for MutexGuard<'a, T> {
         unsafe { &mut *self.mutex.data.get() }
     }
 }
+
+unsafe impl<T: Sync> Sync for MutexGuard<'_, T> {}
