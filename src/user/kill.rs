@@ -9,6 +9,11 @@ fn main() {
     }
 
     for arg in args {
-        sys::kill(arg.parse::<usize>().unwrap()).unwrap()
+
+        if arg.parse::<usize>().unwrap() != 0{
+            sys::kill(arg.parse::<usize>().unwrap()).unwrap()
+        }else{
+            panic!("Operation not permitted: Kill root process")
+        }
     }
 }
