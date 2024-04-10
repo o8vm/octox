@@ -44,17 +44,18 @@ In addition to executing commands, you can only do the following things.
 
 ** Userland Application
 
-The userland comes with a user library called ulib that is similar to Rust’s
-std, so you can use it to develop your favorite commands. If you create a bin
-crate named ~_command~ in src/user, the build.rs and mkfs.rs will place a file
-named ~command~ in the file system and make it available for use.
+The userland comes with a user library called ulib (located at src/user/lib)
+that is similar to Rust’s std, so you can use it to develop your favorite 
+commands. If you create a bin crate named ~_command~ in src/user/bin, the 
+build.rs and mkfs.rs will place a file named ~command~ in the file system 
+and make it available for use.
 
 - In src/user/Cargo.toml, define a bin crate with the name of the command you
   want to create with a ~_~ prefix
   #+begin_src toml
     [[bin]]
     name = "_rm"
-    path = "rm.rs"
+    path = "bin/rm.rs"
   #+end_src
 - userland is also no_std, so don’t forget to add ~#[no_std]~. Use ulib to
   develop any command you like. Here is an example of the rm command.

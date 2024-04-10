@@ -12,59 +12,59 @@ forced-target = "riscv64gc-unknown-none-elf"
 
 [lib]
 name = "ulib"
-path = "lib.rs"
+path = "lib/lib.rs"
 
 [[bin]]
 name = "_cat"
-path = "cat.rs"
+path = "bin/cat.rs"
 
 [[bin]]
 name = "_echo"
-path = "echo.rs"
+path = "bin/echo.rs"
 
 [[bin]]
 name = "_grep"
-path = "grep.rs"
+path = "bin/grep.rs"
 
 [[bin]]
 name = "_init"
-path = "init.rs"
+path = "bin/init.rs"
 
 [[bin]]
 name = "_initcode"
-path = "initcode.rs"
+path = "bin/initcode.rs"
 
 [[bin]]
 name = "_kill"
-path = "kill.rs"
+path = "bin/kill.rs"
 
 [[bin]]
 name = "_ln"
-path = "ln.rs"
+path = "bin/ln.rs"
 
 [[bin]]
 name = "_ls"
-path = "ls.rs"
+path = "bin/ls.rs"
 
 [[bin]]
 name = "_mkdir"
-path = "mkdir.rs"
+path = "bin/mkdir.rs"
 
 [[bin]]
 name = "_rm"
-path = "rm.rs"
+path = "bin/rm.rs"
 
 [[bin]]
 name = "_sh"
-path = "sh.rs"
+path = "bin/sh.rs"
 
 [[bin]]
 name = "_wc"
-path = "wc.rs"
+path = "bin/wc.rs"
 
 [[bin]]
 name = "_head"
-path = "head.rs"
+path = "bin/head.rs"
 
 [dependencies]
 libkernel = { workspace = true }
