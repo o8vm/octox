@@ -68,7 +68,7 @@ path = "bin/head.rs"
 
 [[bin]]
 name = "_clear"
-path = "clear.rs"
+path = "bin/clear.rs"
 
 [dependencies]
 libkernel = { workspace = true }
