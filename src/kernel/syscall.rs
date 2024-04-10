@@ -343,7 +343,6 @@ impl SysCalls {
             let pid = argraw(0);
 
             if pid == 0 {
-                println!("Operation not permitted: Kill root process");
                 Err(PermissionDenied)
             }else{
                 kill(pid)
