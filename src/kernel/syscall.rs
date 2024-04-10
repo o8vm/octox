@@ -341,7 +341,13 @@ impl SysCalls {
         #[cfg(all(target_os = "none", feature = "kernel"))]
         {
             let pid = argraw(0);
-            kill(pid)
+
+            if pid == 0 {
+                println!("Operation not permitted: Kill root process");
+                Err(PermissionDenied)
+            }else{
+                kill(pid)
+            }
         }
     }
     pub fn uptime() -> Result<usize> {
