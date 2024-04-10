@@ -10,5 +10,5 @@ use ulib::{
 fn main() {
 
     // clear the screen
-    stdout().write_fmt(format_args!("\x1b[2J\x1b[H")).unwrap();
+    stdout().write(b"\x1b[2J\x1b[H").unwrap();
 }
