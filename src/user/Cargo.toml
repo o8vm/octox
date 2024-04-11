@@ -66,6 +66,10 @@ path = "bin/wc.rs"
 name = "_head"
 path = "bin/head.rs"
 
+[[bin]]
+name = "_clear"
+path = "bin/clear.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 

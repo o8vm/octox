@@ -341,7 +341,12 @@ impl SysCalls {
         #[cfg(all(target_os = "none", feature = "kernel"))]
         {
             let pid = argraw(0);
-            kill(pid)
+
+            if pid == 0 {
+                Err(PermissionDenied)
+            }else{
+                kill(pid)
+            }
         }
     }
     pub fn uptime() -> Result<usize> {
