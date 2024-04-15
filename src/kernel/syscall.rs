@@ -344,7 +344,7 @@ impl SysCalls {
 
             if pid == 0 {
                 Err(PermissionDenied)
-            }else{
+            } else {
                 kill(pid)
             }
         }
