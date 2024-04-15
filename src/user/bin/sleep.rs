@@ -8,12 +8,7 @@ fn main(){
     if args.peek().is_none() {
         panic!("Usage: sleep TIME...")
     }
-    
-    for arg in args {
-        
-        match arg.parse::<usize>() {
-            Ok(n)  => sys::sleep(n).unwrap(),
-            Err(n) => panic!("This entry is invalid!"),
-        }
-    }
+
+    let n = args.next().unwrap();
+    sys::sleep(n.parse().unwrap()).unwrap();
 }
