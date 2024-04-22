@@ -74,6 +74,10 @@ path = "bin/clear.rs"
 name = "_sleep"
 path = "bin/sleep.rs"
 
+[[bin]]
+name = "_touch"
+path = "bin/touch.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 
