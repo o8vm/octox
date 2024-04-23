@@ -9,6 +9,6 @@ fn main() {
     }
     for arg in args {
         
-        fs::create_file(arg).unwrap();
+        fs::File::create(arg);
     }
 }
