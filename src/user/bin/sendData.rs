@@ -1,6 +1,8 @@
 #![no_std]
 
 use ulib::{
+    println,print,
+    eprint, eprintln,
     env,
     fs::File,
     io::{Read, Write},
@@ -8,6 +10,9 @@ use ulib::{
     sys,
 };
 fn main(){
+    let mut args = env::args().skip(2).peekable();
+    let initial_sleep_time: &str = args.next().unwrap();
+    sys::sleep(initial_sleep_time.parse().unwrap());
     let mut idx = 0;
     loop {
         if idx == 5 {
