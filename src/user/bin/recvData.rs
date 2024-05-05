@@ -4,6 +4,8 @@ use ulib::{env, fs::File, io::Read, print, println, stdio::stdin, sys};
 fn main() {
         let mut args = env::args().skip(1).peekable();
         let mut gNum: &str = args.next().unwrap();
+        let initial_sleep_time: &str = args.next().unwrap();
+        sys::sleep(initial_sleep_time.parse().unwrap());
         let mut gNumInt: i32 = gNum.parse().unwrap();
         wc(stdin(),gNumInt).unwrap();    
 }
