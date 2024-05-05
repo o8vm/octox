@@ -74,6 +74,18 @@ path = "bin/clear.rs"
 name = "_sleep"
 path = "bin/sleep.rs"
 
+[[bin]]
+name = "_sendData"
+path = "bin/sendData.rs"
+
+[[bin]]
+name = "_recvData"
+path = "bin/recvData.rs"
+
+[[bin]]
+name = "_benchmark"
+path = "bin/benchmark.rs"
+
 [dependencies]
 libkernel = { workspace = true }
 

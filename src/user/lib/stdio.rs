@@ -28,7 +28,10 @@ impl Stdin {
         self.inner.set(Mutex::new(file)).or(Err(AlreadyExists))
     }
     pub fn replace(&mut self, src: &File) -> sys::Result<()> {
-        File::dup2(src, &mut self.inner.get().unwrap().lock())
+        // Print debug information before performing the operation
+        File::dup2(src, &mut self.inner.
+            get_or_init(|| Mutex::new(unsafe { File::from_raw_fd(STDIN_FILENO) })).
+            lock())
     }
 
     pub fn read_line(&mut self, buf: &mut String) -> sys::Result<usize> {
