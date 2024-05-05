@@ -23,6 +23,7 @@ fn main() {
     let mut children: Vec<Option<Child>> = vec![];
     println!("Launching benchmark");
 
+    let startUptime = sys::uptime().unwrap();
     // read and run input commands.
     'mainL: loop {
         let mut args = env::args().skip(1).peekable();
@@ -57,9 +58,10 @@ fn main() {
 
 
 
-
+                    let timeDiff = sys::uptime().unwrap() - startUptime;
+                    let sleepTime = (nInt*30) - timeDiff;
                     match Command::new(command)
-                    .args(vec![&idx.to_string()])
+                    .args(vec![&idx.to_string(),&sleepTime.to_string()])
                         .stdin(stdin)
                         .stdout(stdout)
                         .spawn()
