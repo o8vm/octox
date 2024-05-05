@@ -234,6 +234,10 @@ pub struct ProcInner {
     pub killed: bool,     // if true, have been killed
     pub xstate: i32,      // Exit status to be returned to parent's wait
     pub pid: PId,         // Process ID
+    pub priority: u32,   // Process priority
+    pub niceness: u32,   // Process niceness     
+    pub ctime: u32,      // Creation time
+    pub n_runs: u32,     // Number of times the process has been scheduled
 }
 
 // These are private to the process, so lock need not be held.
@@ -362,6 +366,7 @@ impl Procs {
                 ProcState::UNUSED => {
                     lock.pid = PId::alloc();
                     lock.state = ProcState::USED;
+                    lock.priority = lock.pid.0 as u32;
 
                     let data = p.data_mut();
                     // Allocate a trapframe page.
@@ -588,6 +593,10 @@ impl ProcInner {
             killed: false,
             xstate: 0,
             pid: PId(0),
+            ctime: 0,
+            n_runs: 0,
+            priority: 0,
+            niceness: 0,
         }
     }
 }
@@ -651,6 +660,8 @@ pub fn dump() {
     }
 }
 
+
+
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
 // Scheduler never returns. It loops, doing:
@@ -660,6 +671,40 @@ pub fn dump() {
 //    via swtch back to the scheduler.
 pub fn scheduler() -> ! {
     let c = unsafe { CPUS.mycpu() };
+
+    loop 
+    {
+        intr_on();
+        let mut highestPriorityPid: usize = 0;
+        let mut highestPriority = u32::MAX;
+        
+        // PROCS.pool.sort();
+        for p in PROCS.pool.iter(){
+            let inner = p.inner.lock();
+            if inner.state == ProcState::RUNNABLE && inner.priority < highestPriority {
+                highestPriority = inner.priority;
+                highestPriorityPid = inner.pid.0;
+                // println!("highest priority: {}", highestPriority);
+            }
+        }
+        // if highestPriorityPid == 0 {
+        //     panic!("No runnable process");
+        // }
+        let highest_priority_proc = PROCS.pool
+        .iter()
+        .find(|p| p.inner.lock().pid.0 == highestPriorityPid)
+        .unwrap();
+        let mut highest_priority_inner = highest_priority_proc.inner.lock();
+
+        highest_priority_inner.state= ProcState::RUNNING;
+        unsafe {
+            (*c).proc.replace(Arc::clone(highest_priority_proc));
+            swtch(&mut (*c).context, &highest_priority_proc.data().context);
+            // Process is done running for now.
+            // It should have changed its p->state before coming back.
+            (*c).proc.take();
+        }
+    }
 
     loop {
         // Avoid deadlock by ensuring thet devices can interrupt.
