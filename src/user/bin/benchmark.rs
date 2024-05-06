@@ -59,7 +59,7 @@ fn main() {
 
 
                     let timeDiff = sys::uptime().unwrap() - startUptime;
-                    let sleepTime = (nInt*30) - timeDiff;
+                    let sleepTime = (nInt*5) - timeDiff;
                     match Command::new(command)
                     .args(vec![&idx.to_string(),&sleepTime.to_string()])
                         .stdin(stdin)

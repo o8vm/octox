@@ -16,6 +16,7 @@ use crate::trampoline::trampoline;
 use crate::trap::usertrap_ret;
 use crate::vm::{Addr, KVAddr, PAddr, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
 use crate::{array, println};
+use crate::syscall::SysCalls;
 use alloc::string::String;
 use alloc::vec::Vec;
 use alloc::{boxed::Box, sync::Arc};
@@ -235,9 +236,16 @@ pub struct ProcInner {
     pub xstate: i32,      // Exit status to be returned to parent's wait
     pub pid: PId,         // Process ID
     pub priority: u32,   // Process priority
-    pub niceness: u32,   // Process niceness     
-    pub ctime: u32,      // Creation time
+    pub dynamic_priority: u32,   // Dynamic Process priority     
+    pub create_time: u32,      // Creation time
     pub n_runs: u32,     // Number of times the process has been scheduled
+    pub run_time: u32,      // Total run time (in ticks)
+    pub sleep_time: u32,      // Sleep time (in ticks)
+    pub end_time: u32,      // Exit time (in ticks)
+    pub turnaround_time: u32,       // Turnaround time (in ticks)
+    pub response_time: u32,       // Response time (in ticks)
+    pub temp_time: u32,       // Temporary time storage variable (in ticks)
+    // pub name: String,     // Process name (debugging)
 }
 
 // These are private to the process, so lock need not be held.
@@ -264,6 +272,16 @@ pub enum ProcState {
     RUNNING,
     ZOMBIE,
 }
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum SchedulerType{
+    ROUNDROBIN,
+    ARRIVALORDER,
+    RUNTIMEPRIORITY,
+    CFSLIKESCHEDULER,
+}
+
+static SCHEDULER_TYPE: SchedulerType = SchedulerType::CFSLIKESCHEDULER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PId(usize);
@@ -366,7 +384,8 @@ impl Procs {
                 ProcState::UNUSED => {
                     lock.pid = PId::alloc();
                     lock.state = ProcState::USED;
-                    lock.priority = lock.pid.0 as u32;
+                    lock.priority = (lock.pid.0 as u32) + 1;
+                    lock.create_time = SysCalls::uptime().unwrap() as u32;
 
                     let data = p.data_mut();
                     // Allocate a trapframe page.
@@ -593,10 +612,16 @@ impl ProcInner {
             killed: false,
             xstate: 0,
             pid: PId(0),
-            ctime: 0,
+            create_time: 0,
+            run_time: 0,
+            sleep_time: 0,
+            end_time: 0,
+            turnaround_time: 0,
+            response_time: 0,
+            temp_time: 0,
             n_runs: 0,
             priority: 0,
-            niceness: 0,
+            dynamic_priority: 0,
         }
     }
 }
@@ -653,8 +678,8 @@ pub fn dump() {
         let data = unsafe { &(*proc.data.get()) };
         if inner.state != ProcState::UNUSED {
             println!(
-                "pid: {:?} state: {:?} name: {:?}, chan: {}",
-                inner.pid, inner.state, data.name, inner.chan
+                "pid: {:?} state: {:?} name: {:?}, chan: {}, sleep_time: {}, run_time: {}, end_time: {}, turnaround_time: {}, response_time: {}, temp_time: {}, n_runs: {}, priority: {}, dynamic_priority: {}",
+                inner.pid, inner.state, data.name, inner.chan, inner.sleep_time, inner.run_time, inner.end_time, inner.turnaround_time, inner.response_time, inner.temp_time, inner.n_runs, inner.priority, inner.dynamic_priority
             );
         }
     }
@@ -672,57 +697,159 @@ pub fn dump() {
 pub fn scheduler() -> ! {
     let c = unsafe { CPUS.mycpu() };
 
-    loop 
-    {
-        intr_on();
-        let mut highestPriorityPid: usize = 0;
-        let mut highestPriority = u32::MAX;
-        
-        // PROCS.pool.sort();
-        for p in PROCS.pool.iter(){
-            let inner = p.inner.lock();
-            if inner.state == ProcState::RUNNABLE && inner.priority < highestPriority {
-                highestPriority = inner.priority;
-                highestPriorityPid = inner.pid.0;
-                // println!("highest priority: {}", highestPriority);
+    // CFS Like Scheduling
+    if SCHEDULER_TYPE == SchedulerType::CFSLIKESCHEDULER {
+        println!("CFS Like Scheduler");
+        loop {
+            intr_on();
+            let mut highestDynamicPriorityPid: usize = 0;
+            let mut highestDynamicPriority = u32::MAX;
+            
+            // PROCS.pool.sort();
+            for p in PROCS.pool.iter(){
+                let inner = p.inner.lock();
+                if inner.state == ProcState::RUNNABLE && inner.dynamic_priority < highestDynamicPriority {
+                    highestDynamicPriority = inner.priority;
+                    highestDynamicPriorityPid = inner.pid.0;
+                    // println!("highest priority: {}", highestPriority);
+                }
             }
-        }
-        // if highestPriorityPid == 0 {
-        //     panic!("No runnable process");
-        // }
-        let highest_priority_proc = PROCS.pool
-        .iter()
-        .find(|p| p.inner.lock().pid.0 == highestPriorityPid)
-        .unwrap();
-        let mut highest_priority_inner = highest_priority_proc.inner.lock();
+            // if highestPriorityPid == 0 {
+            //     panic!("No runnable process");
+            // }
+            let highest_dynamic_priority_proc = PROCS.pool
+            .iter()
+            .find(|p| p.inner.lock().pid.0 == highestDynamicPriorityPid)
+            .unwrap();
+            let mut highest_dynamic_priority_inner = highest_dynamic_priority_proc.inner.lock();
 
-        highest_priority_inner.state= ProcState::RUNNING;
-        unsafe {
-            (*c).proc.replace(Arc::clone(highest_priority_proc));
-            swtch(&mut (*c).context, &highest_priority_proc.data().context);
-            // Process is done running for now.
-            // It should have changed its p->state before coming back.
-            (*c).proc.take();
+            highest_dynamic_priority_inner.state = ProcState::RUNNING;
+            highest_dynamic_priority_inner.temp_time = SysCalls::uptime().unwrap() as u32;
+            highest_dynamic_priority_inner.n_runs += 1;
+            if highest_dynamic_priority_inner.response_time == 0 {
+                highest_dynamic_priority_inner.response_time = SysCalls::uptime().unwrap() as u32 - highest_dynamic_priority_inner.create_time;
+            }
+            unsafe {
+                (*c).proc.replace(Arc::clone(highest_dynamic_priority_proc));
+                swtch(&mut (*c).context, &highest_dynamic_priority_proc.data().context);
+                // Process is done running for now.
+                // It should have changed its p->state before coming back.
+                (*c).proc.take();
+            }
         }
     }
 
-    loop {
-        // Avoid deadlock by ensuring thet devices can interrupt.
-        intr_on();
+    
+    // Runtime based priority
+    else if SCHEDULER_TYPE == SchedulerType::RUNTIMEPRIORITY {
+        println!("Runtime Priority Scheduler");
+        loop {
+            intr_on();
+            let mut leastRuntimePid: usize = 0;
+            let mut leastRuntime = u32::MAX;
+            
+            // PROCS.pool.sort();
+            for p in PROCS.pool.iter(){
+                let inner = p.inner.lock();
+                if inner.state == ProcState::RUNNABLE && inner.run_time < leastRuntime {
+                    leastRuntime = inner.run_time;
+                    leastRuntimePid = inner.pid.0;
+                    // println!("highest priority: {}", leastRuntime);
+                }
+            }
+            // if leastRuntimePid == 0 {
+            //     panic!("No runnable process");
+            // }
+            let least_runtime_proc = PROCS.pool
+            .iter()
+            .find(|p| p.inner.lock().pid.0 == leastRuntimePid)
+            .unwrap();
+            let mut least_runtime_inner = least_runtime_proc.inner.lock();
 
-        for p in PROCS.pool.iter() {
-            let mut inner = p.inner.lock();
-            if inner.state == ProcState::RUNNABLE {
-                // Switch to chosen process. It is the process's job
-                // to release its lock and then reacquire it
-                // before jumping back to us.
-                inner.state = ProcState::RUNNING;
-                unsafe {
-                    (*c).proc.replace(Arc::clone(p));
-                    swtch(&mut (*c).context, &p.data().context);
-                    // Process is done running for now.
-                    // It should have changed its p->state before coming back.
-                    (*c).proc.take();
+            least_runtime_inner.state = ProcState::RUNNING;
+            least_runtime_inner.temp_time = SysCalls::uptime().unwrap() as u32;
+            least_runtime_inner.n_runs += 1;
+            if least_runtime_inner.response_time == 0 {
+                least_runtime_inner.response_time = SysCalls::uptime().unwrap() as u32 - least_runtime_inner.create_time;
+            }
+            unsafe {
+                (*c).proc.replace(Arc::clone(least_runtime_proc));
+                swtch(&mut (*c).context, &least_runtime_proc.data().context);
+                // Process is done running for now.
+                // It should have changed its p->state before coming back.
+                (*c).proc.take();
+            }
+        }
+    }
+    // Arrival based priority
+    else if SCHEDULER_TYPE == SchedulerType::ARRIVALORDER {
+        println!("Arrival Order Scheduler");
+        loop 
+        {
+            intr_on();
+            let mut highestPriorityPid: usize = 0;
+            let mut highestPriority = u32::MAX;
+            
+            // PROCS.pool.sort();
+            for p in PROCS.pool.iter(){
+                let inner = p.inner.lock();
+                if inner.state == ProcState::RUNNABLE && inner.priority < highestPriority {
+                    highestPriority = inner.priority;
+                    highestPriorityPid = inner.pid.0;
+                    // println!("highest priority: {}", highestPriority);
+                }
+            }
+            // if highestPriorityPid == 0 {
+            //     panic!("No runnable process");
+            // }
+            let highest_priority_proc = PROCS.pool
+            .iter()
+            .find(|p| p.inner.lock().pid.0 == highestPriorityPid)
+            .unwrap();
+            let mut highest_priority_inner = highest_priority_proc.inner.lock();
+
+            highest_priority_inner.state = ProcState::RUNNING;
+            highest_priority_inner.temp_time = SysCalls::uptime().unwrap() as u32;
+            highest_priority_inner.n_runs += 1;
+            if highest_priority_inner.response_time == 0 {
+                highest_priority_inner.response_time = SysCalls::uptime().unwrap() as u32 - highest_priority_inner.create_time;
+            }
+            unsafe {
+                (*c).proc.replace(Arc::clone(highest_priority_proc));
+                swtch(&mut (*c).context, &highest_priority_proc.data().context);
+                // Process is done running for now.
+                // It should have changed its p->state before coming back.
+                (*c).proc.take();
+            }
+        }
+    }
+
+    // Round Robin
+    else {
+        println!("Round Robin Scheduler");        
+        loop {
+            // Avoid deadlock by ensuring thet devices can interrupt.
+            intr_on();
+
+            for p in PROCS.pool.iter() {
+                let mut inner = p.inner.lock();
+                if inner.state == ProcState::RUNNABLE {
+                    // Switch to chosen process. It is the process's job
+                    // to release its lock and then reacquire it
+                    // before jumping back to us.
+                    inner.state = ProcState::RUNNING;
+                    inner.temp_time = SysCalls::uptime().unwrap() as u32;
+                    inner.n_runs += 1;
+                    if inner.response_time == 0 {
+                        inner.response_time = SysCalls::uptime().unwrap() as u32 - inner.create_time;
+                    }
+                    unsafe {
+                        (*c).proc.replace(Arc::clone(p));
+                        swtch(&mut (*c).context, &p.data().context);
+                        // Process is done running for now.
+                        // It should have changed its p->state before coming back.
+                        (*c).proc.take();
+                    }
                 }
             }
         }
@@ -763,6 +890,16 @@ pub fn yielding() {
     let p = Cpus::myproc().unwrap();
     let mut guard = p.inner.lock();
     guard.state = ProcState::RUNNABLE;
+    guard.run_time += SysCalls::uptime().unwrap() as u32 - guard.temp_time;
+
+    // Comment out the line below when using any other scheduler implementation
+    guard.dynamic_priority = 10 * guard.run_time / guard.priority;
+
+    // println!(
+    //     "pid: {:?} state: {:?}, chan: {}, sleep_time: {}, run_time: {}, end_time: {}, turnaround_time: {}, response_time: {}, temp_time: {}, n_runs: {}, priority: {}, niceness: {}",
+    //     guard.pid, guard.state, guard.chan, guard.sleep_time, guard.run_time, guard.end_time, guard.turnaround_time, guard.response_time, guard.temp_time, guard.n_runs, guard.priority, guard.niceness
+    // );
+    // println!("Runtime {}", guard.run_time);
     sched(guard, &mut p.data_mut().context);
 }
 
@@ -799,7 +936,15 @@ pub fn exit(status: i32) -> ! {
         // Parent might be sleeping in wait().
         self::wakeup(Arc::as_ptr(parents[p.idx].as_ref().unwrap()) as usize);
         proc_guard = p.inner.lock();
+        proc_guard.run_time += SysCalls::uptime().unwrap() as u32 - proc_guard.temp_time;
+        proc_guard.end_time = SysCalls::uptime().unwrap() as u32;
+        proc_guard.turnaround_time = proc_guard.end_time - proc_guard.create_time;
+        proc_guard.sleep_time = proc_guard.turnaround_time - proc_guard.run_time;
         proc_guard.xstate = status;
+        println!(
+            "pid: {:?} state: {:?} name: {:?}, chan: {}, create_time: {}, sleep_time: {}, run_time: {}, end_time: {}, turnaround_time: {}, response_time: {}, temp_time: {}, n_runs: {}, priority: {}, dynamic_priority: {}",
+            proc_guard.pid, proc_guard.state, data.name, proc_guard.chan, proc_guard.create_time, proc_guard.sleep_time, proc_guard.run_time, proc_guard.end_time, proc_guard.turnaround_time, proc_guard.response_time, proc_guard.temp_time, proc_guard.n_runs, proc_guard.priority, proc_guard.dynamic_priority
+        );
         proc_guard.state = ProcState::ZOMBIE;
     }
 
@@ -933,6 +1078,7 @@ pub fn wait(addr: UVAddr) -> Result<usize> {
                     let c_guard = c.inner.lock();
                     havekids = true;
                     if c_guard.state == ProcState::ZOMBIE {
+                        
                         // Found one.
                         pid = c_guard.pid.0;
                         p.data_mut()
