@@ -8,7 +8,6 @@ fn main() {
         panic!("Usage: touch files...")
     }
     for arg in args {
-        
         fs::File::create(arg);
     }
 }
