@@ -8,6 +8,7 @@ use crate::{
     riscv::{pgroundup, pteflags, PGSIZE},
     sleeplock::SleepLockGuard,
     vm::{Addr, UVAddr, Uvm, VirtAddr},
+    memlayout::STACK_PAGE_NUM,
 };
 use alloc::string::{String, ToString};
 use core::mem::size_of;
@@ -133,17 +134,18 @@ pub fn exec(path: &Path, argv: [Option<String>; MAXARG]) -> Result<usize> {
 
         let oldsz = proc_data.sz;
 
-        // Allocate two pages at the next page boundary.
+        // Allocate some pages at the next page boundary.
         // Make the first inaccessible as a stack guard.
-        // Use the second as the user stack.
+        // Use the next STACK_PAGE_NUM pages as the user stack.
+        let pgnum = 1 + STACK_PAGE_NUM;
         sz = pgroundup(sz);
         sz = uvm
             .as_mut()
             .unwrap()
-            .alloc(sz, sz + 2 * PGSIZE, pteflags::PTE_W)?;
-        uvm.as_mut().unwrap().clear(From::from(sz - 2 * PGSIZE));
+            .alloc(sz, sz + pgnum * PGSIZE, pteflags::PTE_W)?;
+        uvm.as_mut().unwrap().clear(From::from(sz - pgnum * PGSIZE));
         let mut sp: UVAddr = UVAddr::from(sz);
-        let stackbase: UVAddr = sp - PGSIZE;
+        let stackbase: UVAddr = sp - PGSIZE * STACK_PAGE_NUM;
 
         // Push argument strings, prepare rest of stack in ustack.
         let mut argc = 0;
