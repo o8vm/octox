@@ -16,8 +16,10 @@ use alloc::{
     vec::Vec,
 };
 
+use ulib::fs::File;
+use ulib::io::Read;
 use ulib::stdio::stdin;
-use ulib::{eprint, eprintln, print, println};
+use ulib::{env, eprint, eprintln, print, println};
 
 #[derive(Debug, PartialEq, Clone)]
 enum Expr {
@@ -40,7 +42,7 @@ impl Display for Expr {
         let value = self.clone();
         let s: String = match value {
             Expr::Symbol(symbol) => symbol,
-            Expr::Keyword(keyword) => keyword,
+            Expr::Keyword(keyword) => format!(":{}", keyword),
             Expr::String(string) => string,
             Expr::Int(i) => i.to_string(),
             Expr::Float(f) => f.to_string(),
@@ -308,6 +310,15 @@ impl Parser {
         Parser { tokens }
     }
 
+    fn parse_program(&mut self) -> Result<Vec<Expr>, Error> {
+        let mut exprs: Vec<Expr> = vec![];
+        while self.tokens.len() > 0 {
+            let expr = self.parse()?;
+            exprs.push(expr);
+        }
+        Ok(exprs)
+    }
+
     fn parse(&mut self) -> Result<Expr, Error> {
         let token = self.tokens.pop_front().unwrap();
         let expr = match token {
@@ -495,7 +506,27 @@ fn repl() {
             }
             tokens = vec![];
         }
+        input = "".to_string();
+        println!("")
     }
+}
+
+fn exec_file(file: &str) -> Result<Expr, Error> {
+    let mut file = File::open(file).unwrap();
+    let mut program = "".to_string();
+    file.read_to_string(&mut program);
+
+    let mut lexer = Lexer::new(program.as_str());
+    let tokens = lexer.tokenize()?;
+    let mut parser = Parser::new(tokens);
+    let exprs = parser.parse_program()?;
+    let evaluator = Evaluator::new();
+    let mut env = Environment::new();
+    for expr in exprs.iter() {
+        evaluator.evaluate(expr.clone(), &mut env)?;
+    }
+    println!("");
+    Ok(Expr::Nil)
 }
 
 fn run(input: &str, evaluator: &mut Evaluator, env: &mut Environment) -> Result<Expr, Error> {
@@ -507,8 +538,13 @@ fn run(input: &str, evaluator: &mut Evaluator, env: &mut Environment) -> Result<
 }
 
 fn main() {
-    // jell_test()
-    repl()
+    // jell_test();
+    let mut args: Vec<&str> = env::args().skip(1).collect();
+    if args.len() == 0 {
+        repl()
+    } else {
+        exec_file(args[0]);
+    }
 }
 
 fn jell_test() {
