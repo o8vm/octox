@@ -42,7 +42,7 @@ impl Display for Expr {
         let value = self.clone();
         let s: String = match value {
             Expr::Symbol(symbol) => symbol,
-            Expr::Keyword(keyword) => keyword,
+            Expr::Keyword(keyword) => format!(":{}", keyword),
             Expr::String(string) => string,
             Expr::Int(i) => i.to_string(),
             Expr::Float(f) => f.to_string(),
