@@ -442,18 +442,69 @@ fn is_special_symbol(c: char) -> bool {
 }
 
 fn repl() {
+    let mut line = String::new();
     let mut input = String::new();
     let mut env = Environment::new();
+    let mut paren_stack: Vec<Token> = vec![];
+    let mut tokens: Vec<Token> = vec![];
     let mut evaluator = Evaluator::new();
     loop {
         print!("user=> ");
-        let result = stdin().read_line(&mut input);
-        if result.is_err() {
+        for _ in 0..paren_stack.len() {
+            print!("  ");
+        }
+        if stdin().read_line(&mut line).is_err() {
             break;
         }
-        match run(input.as_str(), &mut evaluator, &mut env) {
-            Err(err) => eprintln!("error: {:?}", err),
-            Ok(expr) => println!("{}", expr),
+
+        let mut lexer = Lexer::new(line.as_str());
+        line = "".to_string();
+
+        let toks = lexer.tokenize().unwrap();
+        for tok in toks.iter() {
+            match tok.clone() {
+                Token::LBrace => paren_stack.push(Token::LBrace),
+                Token::LBracket => paren_stack.push(Token::LBracket),
+                Token::LParen => paren_stack.push(Token::LParen),
+                Token::LSharpBrace => paren_stack.push(Token::LSharpBrace),
+                Token::RBrace => match paren_stack.last() {
+                    Some(&Token::LBrace) => {
+                        paren_stack.pop();
+                    }
+                    Some(&Token::LSharpBrace) => {
+                        paren_stack.pop();
+                    }
+                    _ => panic!(),
+                },
+                Token::RBracket => match paren_stack.last() {
+                    Some(&Token::LBracket) => {
+                        paren_stack.pop();
+                    }
+                    _ => panic!(),
+                },
+                Token::RParen => match paren_stack.last() {
+                    Some(&Token::LParen) => {
+                        paren_stack.pop();
+                    }
+                    _ => panic!(),
+                },
+                _ => {}
+            }
+        }
+
+        tokens.append(&mut toks.clone());
+
+        if paren_stack.len() == 0 {
+            input = "".to_string();
+            let mut parser = Parser::new(tokens);
+            match parser.parse() {
+                Ok(expr) => match evaluator.evaluate(expr, &mut env) {
+                    Ok(expr) => println!("{}", expr),
+                    Err(err) => eprintln!("error: {:?}", err),
+                },
+                Err(err) => panic!(),
+            }
+            tokens = vec![];
         }
         input = "".to_string();
         println!("")
