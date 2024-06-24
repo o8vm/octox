@@ -456,6 +456,7 @@ fn repl() {
             Ok(expr) => println!("{}", expr),
         }
         input = "".to_string();
+        println!("")
     }
 }
 
