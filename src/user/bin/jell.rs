@@ -21,7 +21,7 @@ use ulib::io::Read;
 use ulib::stdio::stdin;
 use ulib::{env, eprint, eprintln, print, println};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 enum Expr {
     Symbol(String),
     Keyword(String),
@@ -35,6 +35,23 @@ enum Expr {
     List(Rc<Vec<Expr>>),
     Vector(Rc<Vec<Expr>>),
     Set(Rc<Vec<Expr>>),
+}
+
+impl PartialEq for Expr {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, &other) {
+            (Expr::Keyword(a), Expr::Keyword(b)) => a == b,
+            (Expr::String(a), Expr::String(b)) => a == b,
+            (Expr::Int(a), Expr::Int(b)) => a == b,
+            (Expr::Float(a), Expr::Float(b)) => a == b,
+            (Expr::Bool(a), Expr::Bool(b)) => a == b,
+            (Expr::Nil, Expr::Nil) => true,
+            (Expr::List(a), Expr::List(b)) => a == b,
+            (Expr::Vector(a), Expr::Vector(b)) => a == b,
+            (Expr::Set(a), Expr::Set(b)) => a == b,
+            _ => true,
+        }
+    }
 }
 
 impl Display for Expr {
@@ -496,18 +513,19 @@ fn repl() {
 
         if paren_stack.len() == 0 {
             input = "".to_string();
-            let mut parser = Parser::new(tokens);
-            match parser.parse() {
-                Ok(expr) => match evaluator.evaluate(expr, &mut env) {
-                    Ok(expr) => println!("{}", expr),
-                    Err(err) => eprintln!("error: {:?}", err),
-                },
-                Err(err) => panic!(),
+            if tokens.len() > 0 {
+                let mut parser = Parser::new(tokens);
+                match parser.parse() {
+                    Ok(expr) => match evaluator.evaluate(expr, &mut env) {
+                        Ok(expr) => println!("{}", expr),
+                        Err(err) => eprintln!("error: {:?}", err),
+                    },
+                    Err(err) => panic!(),
+                }
+                tokens = vec![];
+                println!("")
             }
-            tokens = vec![];
         }
-        input = "".to_string();
-        println!("")
     }
 }
 
@@ -696,6 +714,13 @@ impl Evaluator {
                 Expr::Keyword(_) => todo!(),
                 Expr::Lambda(vars, body, inner_env) => {
                     let mut let_args: Vec<Expr> = vec![];
+                    if vars.len() != rest.len() {
+                        return Err(Error::RuntimeError(format!(
+                            "function takes {} arguments but got {} arguments",
+                            vars.len(),
+                            rest.len()
+                        )));
+                    }
                     for (name, val) in zip(vars, rest) {
                         let_args.push(Expr::Symbol(name));
                         let_args.push(self.evaluate(val.clone(), env)?)
