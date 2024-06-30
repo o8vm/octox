@@ -723,7 +723,10 @@ impl Evaluator {
                     }
                     for (name, val) in zip(vars, rest) {
                         let_args.push(Expr::Symbol(name));
-                        let_args.push(self.evaluate(val.clone(), env)?)
+                        let_args.push(Expr::List(Rc::new(vec![
+                            Expr::Symbol("quote".into()),
+                            self.evaluate(val.clone(), env)?,
+                        ])));
                     }
                     let mut args = vec![Expr::Vector(Rc::new(let_args.clone()))];
                     args.append(&mut body.clone());
