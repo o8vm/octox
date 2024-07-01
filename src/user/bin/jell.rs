@@ -304,8 +304,8 @@ impl Lexer {
         }
         self.read_char();
         let x = &self.input[pos..self.pos - 1];
-        match x.iter().collect::<String>().parse() {
-            Ok(f) => Ok(f),
+        match x.iter().collect::<String>().parse::<String>() {
+            Ok(f) => Ok(unescape(f.as_str())),
             Err(_) => Err(Error::LexicalError("failed to read string".into())),
         }
     }
@@ -2042,4 +2042,12 @@ fn evaluator_test() {
             println!("{:?}", result)
         }
     }
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\\\", "\\")
+        .replace("\\'", "\'")
 }
