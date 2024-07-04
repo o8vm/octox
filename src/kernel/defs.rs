@@ -24,6 +24,7 @@ pub unsafe fn as_bytes_mut<T: ?Sized>(refs: &mut T) -> &mut [u8] {
 
 // Array Macro for const variables
 pub use core::mem::{ManuallyDrop, MaybeUninit};
+use core::net::Ipv4Addr;
 
 use crate::{fs::DirEnt, stat::Stat};
 
@@ -50,6 +51,10 @@ macro_rules! array {
     };
 }
 
+// # Safety
+// - The memory layout of T must be fixed and all bytes of T must be valid.
+// - It must be safe to interpret an instance of T as a slice of bytes.
+// - A reference to T must be able to coexist with a byte slice reference to the same memory.
 pub unsafe trait AsBytes {
     fn as_bytes(&self) -> &[u8] {
         unsafe {
@@ -66,6 +71,43 @@ pub unsafe trait AsBytes {
         }
     }
 }
+
+// # Safety
+// - The memory layout of T must be fixed and all bytes of T must be valid.
+// - It must be safe to interpret a properly aligned byte slice of the correct length as an instance of T.
+// - A reference to T must be able to coexist with a byte slice reference to the same memory.
+pub unsafe trait FromBytes: Sized {
+    fn ref_from(bytes: &[u8]) -> Option<&Self> {
+        if bytes.len() < core::mem::size_of::<Self>() {
+            None
+        } else {
+            unsafe { Some(&*(bytes.as_ptr() as *const Self)) }
+        }
+    }
+    fn mut_from(bytes: &mut [u8]) -> Option<&mut Self> {
+        if bytes.len() < core::mem::size_of::<Self>() {
+            None
+        } else {
+            unsafe { Some(&mut *(bytes.as_mut_ptr() as *mut Self)) }
+        }
+    }
+    fn read_from(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < core::mem::size_of::<Self>() {
+            None
+        } else {
+            let mut value = core::mem::MaybeUninit::<Self>::uninit();
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    bytes.as_ptr(),
+                    value.as_mut_ptr() as *mut u8,
+                    core::mem::size_of::<Self>(),
+                );
+                Some(value.assume_init())
+            }
+        }
+    }
+}
+
 // u8, [u8; N], [u8], stats
 unsafe impl AsBytes for Stat {}
 unsafe impl AsBytes for str {}
@@ -74,7 +116,16 @@ unsafe impl AsBytes for usize {}
 unsafe impl AsBytes for i32 {}
 unsafe impl<T: AsBytes> AsBytes for [T] {}
 unsafe impl<T: AsBytes, const N: usize> AsBytes for [T; N] {}
+unsafe impl AsBytes for DirEnt {}
+unsafe impl AsBytes for Ipv4Addr {}
 // null pointer optimization
 unsafe impl AsBytes for Option<&str> {}
 unsafe impl AsBytes for Option<&[u8]> {}
-unsafe impl AsBytes for DirEnt {}
+
+unsafe impl FromBytes for u8 {}
+unsafe impl FromBytes for u16 {}
+unsafe impl FromBytes for u32 {}
+unsafe impl FromBytes for u64 {}
+unsafe impl FromBytes for usize {}
+unsafe impl<T: FromBytes, const N: usize> FromBytes for [T; N] {}
+unsafe impl FromBytes for Ipv4Addr {}
