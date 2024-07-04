@@ -1,3 +1,4 @@
 /target
 Cargo.lock
 /src/user/usys.rs
+/src/user/lib/_*

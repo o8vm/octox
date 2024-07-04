@@ -1,5 +1,5 @@
 use std::{
-    fs,
+    fs::{self, ReadDir},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -52,9 +52,8 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
         .expect("failed to run cargo install for uprogs");
     if status.success() {
         let path = out_dir.join("bin");
-        let uprogs: Vec<PathBuf> = fs::read_dir(path)
-            .unwrap()
-            .filter(|path| {
+        let gen_args = |dir: ReadDir| {
+            dir.filter(|path| {
                 path.as_ref()
                     .unwrap()
                     .path()
@@ -65,7 +64,11 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
                     .contains('_')
             })
             .map(|path| path.as_ref().unwrap().path())
-            .collect();
+            .collect::<Vec<PathBuf>>()
+        };
+        let mut uprogs: Vec<PathBuf> = gen_args(fs::read_dir(path).unwrap());
+        let libs: Vec<PathBuf> = gen_args(fs::read_dir(local_path.join("lib")).unwrap());
+        uprogs.extend(libs);
         (local_path, uprogs)
     } else {
         panic!("failed to build user programs");
