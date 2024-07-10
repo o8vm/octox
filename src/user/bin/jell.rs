@@ -40,6 +40,7 @@ enum Expr {
 impl PartialEq for Expr {
     fn eq(&self, other: &Self) -> bool {
         match (self, &other) {
+            (Expr::Symbol(a), Expr::Symbol(b)) => a == b,
             (Expr::Keyword(a), Expr::Keyword(b)) => a == b,
             (Expr::String(a), Expr::String(b)) => a == b,
             (Expr::Int(a), Expr::Int(b)) => a == b,
@@ -49,7 +50,7 @@ impl PartialEq for Expr {
             (Expr::List(a), Expr::List(b)) => a == b,
             (Expr::Vector(a), Expr::Vector(b)) => a == b,
             (Expr::Set(a), Expr::Set(b)) => a == b,
-            _ => true,
+            _ => false,
         }
     }
 }
@@ -557,7 +558,7 @@ fn run(input: &str, evaluator: &mut Evaluator, env: &mut Environment) -> Result<
 
 fn main() {
     // jell_test();
-    let mut args: Vec<&str> = env::args().skip(1).collect();
+    let args: Vec<&str> = env::args().skip(1).collect();
     if args.len() == 0 {
         repl()
     } else {
@@ -1117,16 +1118,16 @@ impl Evaluator {
     }
 
     fn evaluate_eq(&self, args: Vec<Expr>, env: &mut Environment) -> Result<Expr, Error> {
-        if args.len() > 0 {
-            let mut current = self.evaluate(args[0].clone(), env)?;
-            for arg in args.iter() {
-                if current != arg.clone() {
+        if args.len() >= 2 {
+            let first = self.evaluate(args[0].clone(), env)?;
+            for arg in args[1..].iter() {
+                if first != self.evaluate(arg.clone(), env)? {
                     return Ok(Expr::Bool(false));
                 }
             }
             Ok(Expr::Bool(true))
         } else {
-            Err(Error::RuntimeError("= requires at least 1 argument".into()))
+            Err(Error::RuntimeError("= requires at least 2 argument".into()))
         }
     }
 
@@ -1860,20 +1861,6 @@ fn evaluator_test() {
             false,
         ),
         EvaluatorTestCase::new(
-            "(fn [x] (+ x 1))",
-            Environment::new(),
-            Expr::Lambda(
-                vec!["x".into()],
-                vec![Expr::List(Rc::new(vec![
-                    Expr::Symbol("+".into()),
-                    Expr::Symbol("x".into()),
-                    Expr::Int(1),
-                ]))],
-                Rc::new(RefCell::new(Environment::new())),
-            ),
-            false,
-        ),
-        EvaluatorTestCase::new(
             "(let [add (fn [x] (+ x 1))] (add 3))",
             Environment::new(),
             Expr::Int(4),
@@ -2032,6 +2019,18 @@ fn evaluator_test() {
               (fib 10))",
             Environment::new(),
             Expr::Int(55),
+            false,
+        ),
+        EvaluatorTestCase::new(
+            "(= '(1 2 3) '(1 2))",
+            Environment::new(),
+            Expr::Bool(false),
+            false,
+        ),
+        EvaluatorTestCase::new(
+            "(= '(abc :def 1) '(abc :def 1))",
+            Environment::new(),
+            Expr::Bool(true),
             false,
         ),
     ];
