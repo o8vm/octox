@@ -32,18 +32,23 @@ pub mod umalloc;
 
 use crate::env::ARGS;
 use core::panic;
+use env::ENVIRON;
 use io::Write;
 
 // wrapper so that it's ok if main() does not call exit().
 #[lang = "start"]
 fn lang_start<T: Termination + 'static>(
     main: fn() -> T,
-    _: isize,
-    args: *const *const u8,
+    argc: isize,
+    argv: *const *const u8,
     _: u8,
 ) -> isize {
     unsafe {
-        ARGS = (args as *const &[&str]).as_ref().copied();
+        if let Some(argv) = (argv as *mut &mut [Option<&str>]).as_mut() {
+            let (args, environ) = argv.split_at_mut(argc as usize);
+            ARGS = Some(args);
+            ENVIRON = Some(environ);
+        }
     }
     let xstatus = main().report() as i32;
     sys::exit(xstatus)

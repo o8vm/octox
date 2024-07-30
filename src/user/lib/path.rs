@@ -9,7 +9,6 @@ pub struct Path {
 }
 
 impl Path {
-    // ここがおかしい、transparentはだめなのかもしれない。
     pub fn new(s: &str) -> &Path {
         unsafe { &*(s as *const str as *const Path) }
     }
@@ -101,7 +100,7 @@ impl Path {
     }
 
     pub fn exists(&self) -> bool {
-        todo!()
+        fs::metadata(self).is_ok()
     }
 }
 

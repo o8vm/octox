@@ -2,11 +2,9 @@
 use ulib::sys;
 
 static INIT: &str = "/init";
-static ARGV: [&str; 2] = ["init", "0"];
+static ARGV: [&str; 1] = ["init"];
 
 fn main() -> sys::Result<()> {
-    sys::exec(INIT, &ARGV)?;
-    //   loop {
+    sys::exec(INIT, &ARGV, None)?;
     sys::exit(0)
-    // }
 }

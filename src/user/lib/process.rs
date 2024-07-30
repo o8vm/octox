@@ -1,21 +1,126 @@
 use core::fmt::Debug;
 
+use alloc::vec;
 use alloc::{
+    collections::btree_map::BTreeMap,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 
 use crate::{
+    env::{self, ENVIRON},
     fs::{File, OpenOptions},
     io::{Read, Write},
     path::Path,
     pipe, sys,
 };
 
+#[derive(Clone, Default)]
+pub struct CommandEnv {
+    clear: bool,
+    saw_path: bool,
+    vars: BTreeMap<String, Option<String>>,
+}
+
+impl CommandEnv {
+    pub fn capture(&self) -> BTreeMap<String, String> {
+        let mut result = BTreeMap::<String, String>::new();
+        if !self.clear {
+            for (k, v) in env::vars() {
+                result.insert(k.to_string(), v.to_string());
+            }
+        }
+        for (k, maybe_v) in &self.vars {
+            if let Some(v) = maybe_v {
+                result.insert(k.to_string(), v.to_string());
+            } else {
+                result.remove(k);
+            }
+        }
+        result
+    }
+
+    pub fn is_unchanged(&self) -> bool {
+        !self.clear && self.vars.is_empty()
+    }
+
+    pub fn capture_if_changed(&self) -> Option<BTreeMap<String, String>> {
+        if self.is_unchanged() {
+            None
+        } else {
+            Some(self.capture())
+        }
+    }
+
+    pub fn maybe_saw_path(&mut self, key: &str) {
+        if !self.saw_path && key == "PATH" {
+            self.saw_path = true;
+        }
+    }
+
+    pub fn set(&mut self, key: &str, value: &str) {
+        self.maybe_saw_path(key);
+        self.vars.insert(key.to_string(), Some(value.to_string()));
+    }
+
+    pub fn remove(&mut self, key: &str) {
+        self.maybe_saw_path(key);
+        if self.clear {
+            self.vars.remove(key);
+        } else {
+            self.vars.insert(key.to_string(), None);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.clear = true;
+        self.vars.clear();
+    }
+
+    pub fn does_clear(&self) -> bool {
+        self.clear
+    }
+
+    pub fn have_changed_path(&self) -> bool {
+        self.saw_path || self.clear
+    }
+
+    pub fn iter(&self) -> CommandEnvs<'_> {
+        let iter = self.vars.iter();
+        CommandEnvs { iter }
+    }
+}
+
+#[derive(Debug)]
+pub struct CommandEnvs<'a> {
+    iter: alloc::collections::btree_map::Iter<'a, String, Option<String>>,
+}
+
+impl<'a> Iterator for CommandEnvs<'a> {
+    type Item = (&'a str, Option<&'a str>);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter
+            .next()
+            .map(|(key, value)| (key.as_ref(), value.as_deref()))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<'a> ExactSizeIterator for CommandEnvs<'a> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+    //    fn is_empty(&self) -> bool {
+    //        self.iter.is_empty()
+    //    }
+}
+
 pub struct Command<'a> {
     program: &'a str,
     argv: Vec<&'a str>,
+    env: CommandEnv,
     cwd: Option<String>,
     stdin: Option<Stdio>,
     stdout: Option<Stdio>,
@@ -79,6 +184,7 @@ impl<'a> Command<'a> {
         Self {
             program,
             argv: vec![program],
+            env: Default::default(),
             cwd: None,
             stdin: None,
             stdout: None,
@@ -107,6 +213,21 @@ impl<'a> Command<'a> {
         self
     }
 
+    pub fn env<K: AsRef<str>, V: AsRef<str>>(&mut self, key: K, val: V) -> &mut Self {
+        self.env_mut().set(key.as_ref(), val.as_ref());
+        self
+    }
+
+    pub fn env_remove<K: AsRef<str>>(&mut self, key: K) -> &mut Self {
+        self.env_mut().remove(key.as_ref());
+        self
+    }
+
+    pub fn env_clear(&mut self) -> &mut Self {
+        self.env_mut().clear();
+        self
+    }
+
     pub fn stdin(&mut self, stdin: Stdio) -> &mut Self {
         self.stdin = Some(stdin);
         self
@@ -128,6 +249,30 @@ impl<'a> Command<'a> {
 
     pub fn get_args(&self) -> &[&str] {
         &self.argv[1..]
+    }
+
+    pub fn get_envs(&self) -> CommandEnvs<'_> {
+        self.env.iter()
+    }
+
+    pub fn env_mut(&mut self) -> &mut CommandEnv {
+        &mut self.env
+    }
+
+    pub fn capture_env(&mut self) -> Option<Vec<String>> {
+        let maybe_env = self.env.capture_if_changed();
+        if let Some(env) = maybe_env {
+            let mut result = Vec::with_capacity(env.len());
+            for (mut k, v) in env {
+                k.reserve_exact(v.len() + 1);
+                k.push_str("=");
+                k.push_str(&v);
+                result.push(k);
+            }
+            Some(result)
+        } else {
+            None
+        }
     }
 
     pub fn get_program(&self) -> &str {
@@ -157,12 +302,19 @@ impl<'a> Command<'a> {
     }
 
     fn spawnp(&mut self, default: Stdio, needs_stdin: bool) -> sys::Result<Child> {
+        let env = self.capture_env();
+        let binding = env.as_ref().map(|e| {
+            e.iter()
+                .map(|s| Some(s.as_str()))
+                .collect::<Vec<Option<&str>>>()
+        });
+        let envp: Option<&[Option<&str>]> = binding.as_deref().or(unsafe { ENVIRON.as_deref() });
         let (ours, theirs) = self.setup_io(default, needs_stdin)?;
         let (mut input, mut output) = pipe::pipe()?;
         let pid = self.do_fork()?;
         if pid == 0 {
             drop(input);
-            let Err(err) = self.do_exec(theirs) else {
+            let Err(err) = self.do_exec(theirs, envp) else {
                 unreachable!()
             };
             let err = (err as isize).to_be_bytes();
@@ -173,7 +325,6 @@ impl<'a> Command<'a> {
         drop(output);
         let mut p = Process::new(pid);
         let mut bytes = [0; 8];
-
         loop {
             match input.read(&mut bytes) {
                 Ok(0) => {
@@ -201,7 +352,7 @@ impl<'a> Command<'a> {
         sys::fork()
     }
 
-    fn do_exec(&mut self, stdio: ChildPipes) -> sys::Result<!> {
+    fn do_exec(&mut self, stdio: ChildPipes, envp: Option<&[Option<&str>]>) -> sys::Result<!> {
         if let ChildStdio::Fd(ref src) = stdio.stdin {
             crate::stdio::stdin().replace(src)?;
         }
@@ -215,8 +366,24 @@ impl<'a> Command<'a> {
         if let Some(cwd) = self.get_current_dir() {
             sys::chdir(cwd.to_str())?;
         }
-
-        match sys::exec(self.program, &self.argv) {
+        let paths = envp
+            .and_then(|e| e.iter().find_map(|s| s.filter(|s| s.starts_with("PATH="))))
+            .map(|path| {
+                path.strip_prefix("PATH=")
+                    .unwrap()
+                    .split(':')
+                    .map(Path::new)
+                    .collect::<Vec<_>>()
+            });
+        if let Some(paths) = paths {
+            for program_path in paths.iter().map(|p| p.join(self.program)) {
+                if program_path.exists() {
+                    let _ = sys::exec(program_path.to_str(), &self.argv, envp)
+                        .map(|_| Err::<!, kernel::error::Error>(sys::Error::Uncategorized))?;
+                }
+            }
+        }
+        match sys::exec(self.program, &self.argv, envp) {
             Ok(_) => Err(sys::Error::Uncategorized), // unreachable
             Err(err) => Err(err),
         }
@@ -264,6 +431,7 @@ impl<'a> Command<'a> {
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct ExitStatus(pub i32);
+#[derive(Debug)]
 pub struct Process {
     pid: usize,
     status: Option<ExitStatus>,
@@ -294,6 +462,7 @@ impl Process {
     }
 }
 
+#[derive(Debug)]
 pub struct Child {
     handle: Process,
     pub stdin: Option<ChildStdin>,
@@ -316,8 +485,10 @@ impl Child {
     }
 }
 
+#[derive(Debug)]
 pub struct ChildStdin(File);
 
+#[derive(Debug)]
 pub struct ChildStdout(File);
 
 impl From<ChildStdout> for Stdio {
@@ -325,7 +496,7 @@ impl From<ChildStdout> for Stdio {
         Stdio::Fd(value.0)
     }
 }
-
+#[derive(Debug)]
 pub struct ChildStderr(File);
 
 #[derive(Debug, PartialEq, Eq, Clone)]

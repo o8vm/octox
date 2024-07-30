@@ -1,7 +1,5 @@
 use std::{
-    fs::{self, ReadDir},
-    path::{Path, PathBuf},
-    process::Command,
+    fs, io::Result, path::{Path, PathBuf}, process::Command
 };
 
 fn main() {
@@ -44,6 +42,7 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
     }
     cmd.arg("--root").arg(out_dir);
     cmd.arg("-vv");
+    cmd.env("ROOT_OUT_DIR", out_dir.to_str().unwrap()); // for libs and etc config
     cmd.env_remove("RUSTFLAGS");
     cmd.env_remove("CARGO_ENCODED_RUSTFLAGS");
     cmd.env_remove("RUSTC_WORKSPACE_WRAPPER");
@@ -51,25 +50,28 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
         .status()
         .expect("failed to run cargo install for uprogs");
     if status.success() {
-        let path = out_dir.join("bin");
-        let gen_args = |dir: ReadDir| {
-            dir.filter(|path| {
-                path.as_ref()
-                    .unwrap()
-                    .path()
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .contains('_')
-            })
-            .map(|path| path.as_ref().unwrap().path())
-            .collect::<Vec<PathBuf>>()
+        let mut ufiles: Vec<PathBuf> = Vec::new();
+        let mut collet_files = |dir: &Path, prefix: Option<&str>| {
+            for entry in fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_file() {
+                    let should_push = match (prefix, path.file_name().and_then(|s| s.to_str())) {
+                        (Some(prefix), Some(name)) if name.starts_with(prefix) => true,
+                        (None, Some(_)) => true,
+                        _ => false,
+                    };
+                    if should_push {
+                        ufiles.push(path);
+                    }
+                }
+            }
         };
-        let mut uprogs: Vec<PathBuf> = gen_args(fs::read_dir(path).unwrap());
-        let libs: Vec<PathBuf> = gen_args(fs::read_dir(local_path.join("lib")).unwrap());
-        uprogs.extend(libs);
-        (local_path, uprogs)
+        let dirs = ["bin", "etc", "lib"];
+        for dir_ent in dirs {
+            let path = out_dir.join(dir_ent);
+            collet_files(&path, Some("_"));
+        }
+        (local_path, ufiles)
     } else {
         panic!("failed to build user programs");
     }

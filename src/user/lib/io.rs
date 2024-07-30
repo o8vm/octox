@@ -79,7 +79,7 @@ pub trait Read {
     }
 }
 
-pub struct BufReader<R> {
+pub struct BufReader<R: ?Sized> {
     inner: R,
 }
 
@@ -106,8 +106,60 @@ impl<R: Read> BufReader<R> {
     }
 }
 
-impl<R: Read> Read for BufReader<R> {
+impl<R: ?Sized + Read> Read for BufReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> sys::Result<usize> {
         self.inner.read(buf)
     }
 }
+
+pub struct Lines<B> {
+    buf: B
+}
+
+impl<B: BufRead> Iterator for Lines<B> {
+    type Item = sys::Result<String>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut buf = String::new();
+        match self.buf.read_line(&mut buf) {
+            Ok(0) => None,
+            Ok(_n) => {
+                if buf.ends_with('\n') {
+                    buf.pop();
+                    if buf.ends_with('\r') {
+                        buf.pop();
+                    }
+                }
+                Some(Ok(buf))
+            },
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+pub trait BufRead: Read {
+    fn lines(self) -> Lines<Self>
+        where
+        Self: Sized,
+    {
+        Lines { buf: self }
+    }
+    fn read_line(&mut self, buf: &mut String) -> sys::Result<usize> {
+        let mut char: [u8; 1] = [0];
+        let mut bytes: Vec<u8> = Vec::new();
+
+        loop {
+            let cc = self.read(&mut char)?;
+            if cc < 1 {
+                break;
+            }
+            bytes.extend_from_slice(&char);
+            if char[0] == b'\n' || char[0] == b'\r' {
+                break;
+            }
+        }
+        buf.push_str(core::str::from_utf8(&bytes).or(Err(Utf8Error))?);
+        Ok(buf.len())
+    }
+}
+
+impl<R: ?Sized + Read> BufRead for BufReader<R> {}

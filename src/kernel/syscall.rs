@@ -85,7 +85,10 @@ impl SysCalls {
         (Fn::U(Self::pipe), "(p: &mut [usize])"), // Create a pipe, put read/write file descpritors in p[0] and p[1].
         (Fn::I(Self::read), "(fd: usize, buf: &mut [u8])"), // Read n bytes into buf; returns number read; or 0 if end of file
         (Fn::U(Self::kill), "(pid: usize)"), // Terminate process PID. Returns Ok(()) or Err(())
-        (Fn::I(Self::exec), "(filename: &str, argv: &[&str])"), // Load a file and execute it with arguments; only returns if error.
+        (
+            Fn::I(Self::exec),
+            "(filename: &str, argv: &[&str], envp: Option<&[Option<&str>]>)",
+        ), // Load a file and execute it with arguments; only returns if error.
         (Fn::U(Self::fstat), "(fd: usize, st: &mut Stat)"), // Place info about an open file into st.
         (Fn::U(Self::chdir), "(dirname: &str)"),            // Change the current directory.
         (Fn::I(Self::dup), "(fd: usize)"), // Return a new file descpritor referring to the same file as fd.
@@ -150,7 +153,7 @@ fn fetch_addr<T: AsBytes>(addr: UVAddr, buf: &mut T) -> Result<()> {
 }
 
 #[cfg(all(target_os = "none", feature = "kernel"))]
-fn fetch_slice<T: AsBytes>(slice_info: Slice, buf: &mut [T]) -> Result<usize> {
+fn fetch_slice<T: AsBytes>(slice_info: Slice, buf: &mut [T]) -> Result<Option<usize>> {
     let mut sbinfo: SBInfo = Default::default();
     match slice_info {
         Slice::Ref(addr) => {
@@ -160,11 +163,17 @@ fn fetch_slice<T: AsBytes>(slice_info: Slice, buf: &mut [T]) -> Result<usize> {
             sbinfo = info;
         }
     }
+    if *sbinfo.ptr.get() == 0 {
+        // Option<&[&T]> = None
+        // sbinfo.len = 0;
+        return Ok(None);
+    }
     if sbinfo.len > buf.len() {
         return Err(NoBufferSpace);
+    } else {
+        either_copyin(&mut buf[..sbinfo.len], sbinfo.ptr.into())?;
     }
-    either_copyin(&mut buf[..sbinfo.len], sbinfo.ptr.into())?;
-    Ok(sbinfo.len)
+    Ok(Some(sbinfo.len))
 }
 
 #[cfg(all(target_os = "none", feature = "kernel"))]
@@ -205,7 +214,7 @@ impl Arg for Path {
     type Out<'a> = &'a Self;
     fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
         let addr: UVAddr = argraw(n).into();
-        let len = fetch_slice(Slice::Ref(addr), input)?;
+        let len = fetch_slice(Slice::Ref(addr), input)?.ok_or(InvalidArgument)?;
         Ok(Self::new(
             str::from_utf8_mut(&mut input[..len])
                 .or(Err(Utf8Error))?
@@ -230,6 +239,7 @@ impl Arg for File {
 }
 
 #[cfg(all(target_os = "none", feature = "kernel"))]
+#[derive(Debug)]
 struct Argv([Option<String>; MAXARG]);
 
 #[cfg(all(target_os = "none", feature = "kernel"))]
@@ -241,15 +251,42 @@ impl Arg for Argv {
         let mut buf = [0u8; PGSIZE];
         let addr = UVAddr::from(argraw(n));
 
-        let n = fetch_slice(Slice::Ref(addr), input)?;
+        let n = fetch_slice(Slice::Ref(addr), input)?.ok_or(InvalidArgument)?;
         for (i, &argument) in input.iter().take(n).enumerate() {
-            let len = fetch_slice(Slice::Buf(argument), &mut buf).unwrap();
-            let arg_str = str::from_utf8_mut(&mut buf[..len])
-                .or(Err(Utf8Error))
-                .unwrap();
-            argv.0[i].replace(arg_str.to_string());
+            if let Some(len) = fetch_slice(Slice::Buf(argument), &mut buf).unwrap() {
+                let arg_str = str::from_utf8_mut(&mut buf[..len])
+                    .or(Err(Utf8Error))
+                    .unwrap();
+                argv.0[i].replace(arg_str.to_string());
+            }
         }
         Ok(argv)
+    }
+}
+
+#[cfg(all(target_os = "none", feature = "kernel"))]
+#[derive(Debug)]
+struct Envp([Option<String>; MAXARG]);
+
+#[cfg(all(target_os = "none", feature = "kernel"))]
+impl Arg for Envp {
+    type In<'a> = [SBInfo; MAXARG];
+    type Out<'a> = Self;
+    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
+        let mut envp = Envp(array![None; MAXARG]);
+        let mut buf = [0u8; PGSIZE];
+        let addr = UVAddr::from(argraw(n));
+
+        let Some(n) = fetch_slice(Slice::Ref(addr), input)? else { return Ok(envp) };
+        for (i, &env) in input.iter().take(n).enumerate() {
+            if let Some(len) = fetch_slice(Slice::Buf(env), &mut buf).unwrap() {
+                let env_str = str::from_utf8_mut(&mut buf[..len])
+                    .or(Err(Utf8Error))
+                    .unwrap();
+                envp.0[i].replace(env_str.to_string());
+            }
+        }
+        Ok(envp)
     }
 }
 
@@ -572,9 +609,11 @@ impl SysCalls {
         {
             let mut path = [0u8; MAXPATH];
             let mut uargv: [SBInfo; MAXARG] = Default::default();
+            let mut uenvp: [SBInfo; MAXARG] = Default::default();
             let path = Path::from_arg(0, &mut path)?;
             let argv = Argv::from_arg(1, &mut uargv)?;
-            exec(path, argv.0)
+            let envp = Envp::from_arg(2, &mut uenvp)?;
+            exec(path, argv.0, envp.0)
         }
     }
     pub fn pipe() -> Result<()> {

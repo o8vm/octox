@@ -1,5 +1,5 @@
 use kernel::{defs::*, fs::*, param::*, stat::*};
-use std::env;
+use std::{env, io};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -261,6 +261,30 @@ fn main() -> std::io::Result<()> {
     de.name[.."..".len()].copy_from_slice("..".as_bytes());
     fsimg.iappend(rootino, mkfs_as_bytes(&de))?;
 
+    let mut create_dir = |name: &str| -> io::Result<u32> {
+        let result = fsimg.ialloc(FileType::Dir)?;
+
+        let mut de: DirEnt = Default::default();
+        de.inum = (result as u16).to_le();
+        de.name[..name.len()].copy_from_slice(name.as_bytes());
+        fsimg.iappend(rootino, mkfs_as_bytes(&de))?;
+        //
+        let mut de: DirEnt = Default::default();
+        de.inum = (result as u16).to_le();
+        de.name[..".".len()].copy_from_slice(".".as_bytes());
+        fsimg.iappend(result, mkfs_as_bytes(&de))?;
+        //
+        let mut de: DirEnt = Default::default();
+        de.inum = (rootino as u16).to_le();
+        de.name[.."..".len()].copy_from_slice("..".as_bytes());
+        fsimg.iappend(result, mkfs_as_bytes(&de))?;
+        Ok(result)
+    };
+    let _devino = create_dir("dev")?;
+    let binino = create_dir("bin")?;
+    let libino = create_dir("lib")?;
+    let etcino = create_dir("etc")?;
+
     for path in args[2..]
         .iter()
         .map(|p| Path::new(p))
@@ -277,6 +301,13 @@ fn main() -> std::io::Result<()> {
             .unwrap()
             .trim_start_matches("_");
         assert!(shortname.len() < 14);
+        let parent_ino = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).map(|parent_name| match parent_name {
+            "bin" if shortname.contains("init") => rootino,
+            "bin" => binino,
+            "lib" => libino,
+            "etc" => etcino,
+            _ => rootino,
+        }).unwrap_or(rootino);
 
         let mut fd = File::open(path)?;
 
@@ -285,7 +316,7 @@ fn main() -> std::io::Result<()> {
         let mut de: DirEnt = Default::default();
         de.inum = (inum as u16).to_le();
         de.name[..shortname.len()].copy_from_slice(shortname.as_bytes());
-        fsimg.iappend(rootino, mkfs_as_bytes(&de))?;
+        fsimg.iappend(parent_ino, mkfs_as_bytes(&de))?;
 
         loop {
             match fd.read(&mut buf) {

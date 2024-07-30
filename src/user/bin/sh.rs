@@ -1,22 +1,19 @@
 #![no_std]
 extern crate alloc;
-use alloc::{string::String, vec::Vec};
+use alloc::{string::{String, ToString}, vec::Vec};
 use ulib::{
-    env, eprint, eprintln,
-    fs::OpenOptions,
-    print,
-    process::{Child, Command, Stdio},
-    stdio::stdin,
+    env, eprint, eprintln, fs::{File, OpenOptions}, io::{BufReader, BufRead}, path::Path, print, process::{Child, Command, Stdio}, stdio::stdin, sys
 };
 
 fn main() {
     // Ensure that three file descriptors are open
-    while let Ok(fd) = OpenOptions::new().read(true).write(true).open("console") {
+    while let Ok(fd) = OpenOptions::new().read(true).write(true).open("/dev/console") {
         if fd.get_fd() > 2 {
             drop(fd);
             break;
         }
     }
+    set_path_fron_etc_paths().unwrap();
 
     // read and run input commands.
     'main: loop {
@@ -113,4 +110,20 @@ fn main() {
             final_command.wait().unwrap();
         }
     }
+}
+
+fn set_path_fron_etc_paths() -> sys::Result<()> {
+    let path_file = "/etc/paths";
+    if Path::new(path_file).exists() {
+        let file = BufReader::new(File::open(path_file)?);
+        let mut paths: Vec<String> = env::var("PATH").unwrap_or_default().split(':').map(String::from).collect();
+        for line in file.lines() {
+            if let Ok(path) = line {
+                paths.push(path);
+            }
+        }
+        let new_path = paths.join(":");
+        env::set_var("PATH", &new_path);
+    }
+    Ok(())
 }
