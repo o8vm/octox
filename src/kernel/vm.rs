@@ -207,6 +207,7 @@ pub unsafe trait PageAllocator: Sized {
 pub struct Page([u8; 4096]);
 unsafe impl PageAllocator for Page {}
 
+#[allow(dead_code)]
 pub struct Stack([u8; PGSIZE * STACK_PAGE_NUM]);
 unsafe impl PageAllocator for Stack {}
 
