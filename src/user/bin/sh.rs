@@ -1,13 +1,27 @@
 #![no_std]
 extern crate alloc;
-use alloc::{string::{String, ToString}, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use ulib::{
-    env, eprint, eprintln, fs::{File, OpenOptions}, io::{BufReader, BufRead}, path::Path, print, process::{Child, Command, Stdio}, stdio::stdin, sys
+    env, eprint, eprintln,
+    fs::{File, OpenOptions},
+    io::{BufRead, BufReader},
+    path::Path,
+    print, println,
+    process::{Child, Command, Stdio},
+    stdio::stdin,
+    sys,
 };
 
 fn main() {
     // Ensure that three file descriptors are open
-    while let Ok(fd) = OpenOptions::new().read(true).write(true).open("/dev/console") {
+    while let Ok(fd) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/console")
+    {
         if fd.get_fd() > 2 {
             drop(fd);
             break;
@@ -36,9 +50,27 @@ fn main() {
                 "cd" => {
                     if num == 0 {
                         // chdir must be called by the parent. if in child do nothing any more.
-                        let new_dir = args.peekable().peek().map_or("/", |x| *x);
+                        let new_dir = args.peek().map_or("/", |x| *x);
                         if let Err(e) = env::set_current_dir(new_dir) {
                             eprintln!("{}", e);
+                        }
+                    }
+                    continue 'main;
+                }
+                "export" => {
+                    if args.peek().map_or(true, |x| *x == "-p") {
+                        for (key, value) in env::vars() {
+                            println!("{}: {}", key, value);
+                        }
+                    } else {
+                        for arg in args {
+                            if let Some((key, value)) = arg.split_once('=') {
+                                if let Err(e) = env::set_var(key, value) {
+                                    eprintln!("{}", e);
+                                }
+                            } else {
+                                eprintln!("export: invalid argument: {}", arg);
+                            }
                         }
                     }
                     continue 'main;
@@ -116,7 +148,12 @@ fn set_path_fron_etc_paths() -> sys::Result<()> {
     let path_file = "/etc/paths";
     if Path::new(path_file).exists() {
         let file = BufReader::new(File::open(path_file)?);
-        let mut paths: Vec<String> = env::var("PATH").unwrap_or_default().split(':').map(String::from).collect();
+        let mut paths: Vec<String> = env::var("PATH")
+            .unwrap_or_default()
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
         for line in file.lines() {
             if let Ok(path) = line {
                 paths.push(path);
