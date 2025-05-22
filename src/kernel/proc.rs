@@ -340,6 +340,7 @@ impl Procs {
 
     // Allocate STACK_PAGE_NUM pages for each process's kernel stack.
     // map it high in memory, followed by an invalid guard page.
+    #[allow(static_mut_refs)]
     pub unsafe fn mapstacks(&self) {
         use crate::vm::Stack;
         for (p, _) in self.pool.iter().enumerate() {

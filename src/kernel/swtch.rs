@@ -1,11 +1,11 @@
 use crate::proc::Context;
-use core::arch::asm;
+use core::arch::naked_asm;
 
 #[no_mangle]
 #[repr(align(16))]
-#[naked]
+#[unsafe(naked)]
 pub unsafe extern "C" fn swtch(old: &mut Context, new: &Context) {
-    asm!(
+    naked_asm!(
         "sd ra, 0(a0)",
         "sd sp, 8(a0)",
         "sd s0, 16(a0)",
@@ -35,6 +35,5 @@ pub unsafe extern "C" fn swtch(old: &mut Context, new: &Context) {
         "ld s10, 96(a1)",
         "ld s11, 104(a1)",
         "ret",
-        options(noreturn)
     );
 }

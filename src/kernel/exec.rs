@@ -98,7 +98,7 @@ pub fn exec(
                     off as u32,
                     size_of::<ProgHdr>(),
                 )?;
-                if phdr.p_type != elf::PT_LOAD || phdr.p_fsize == 0 {
+                if phdr.p_type != elf::PT_LOAD {
                     continue;
                 }
                 if phdr.p_msize < phdr.p_fsize {

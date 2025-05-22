@@ -34,6 +34,7 @@ unsafe impl GlobalAlloc for Kmem {
     }
 }
 
+#[allow(static_mut_refs)]
 pub fn init() {
     unsafe {
         KMEM.0.lock().init(end.as_ptr() as usize, PHYSTOP).unwrap();

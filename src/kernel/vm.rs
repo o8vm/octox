@@ -695,6 +695,7 @@ impl Kvm {
 }
 
 // Initialize the one kernel_pagetable
+#[allow(static_mut_refs)]
 pub fn kinit() {
     unsafe {
         KVM.set(Kvm::new().unwrap()).unwrap();
@@ -704,6 +705,7 @@ pub fn kinit() {
 
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
+#[allow(static_mut_refs)]
 pub fn kinithart() {
     unsafe {
         satp::write(KVM.get().unwrap().as_satp());

@@ -3,11 +3,8 @@
     all(target_os = "none", feature = "kernel"),
     feature(alloc_error_handler)
 )]
-#![cfg_attr(all(target_os = "none", feature = "kernel"), feature(new_uninit))]
 #![cfg_attr(all(target_os = "none", feature = "kernel"), feature(allocator_api))]
 #![feature(negative_impls)]
-#![feature(naked_functions)]
-#![feature(asm_const)]
 #![feature(fn_align)]
 #![feature(variant_count)]
 #![allow(clippy::missing_safety_doc)]

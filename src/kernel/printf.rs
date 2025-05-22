@@ -72,6 +72,7 @@ macro_rules! println {
 
 pub static mut EWRITER: Writer = Writer;
 
+#[allow(static_mut_refs)]
 pub fn _eprint(args: fmt::Arguments<'_>) {
     use fmt::Write;
     unsafe {
