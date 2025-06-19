@@ -51,7 +51,7 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
         .expect("failed to run cargo install for uprogs");
     if status.success() {
         let mut ufiles: Vec<PathBuf> = Vec::new();
-        let mut collet_files = |dir: &Path, prefix: Option<&str>| {
+        let mut collect_files = |dir: &Path, prefix: Option<&str>, extensions: Option<&[&str]>| {
             for entry in fs::read_dir(dir).unwrap().filter_map(Result::ok) {
                 let path = entry.path();
                 if path.is_file() {
@@ -61,16 +61,48 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
                         _ => false,
                     };
                     if should_push {
+                        if let Some(exts) = extensions {
+                            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                                if !exts.contains(&ext) {
+                                    continue;
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
                         ufiles.push(path);
                     }
                 }
             }
         };
+
+        // Collect binary files
         let dirs = ["bin", "etc", "lib"];
         for dir_ent in dirs {
             let path = out_dir.join(dir_ent);
-            collet_files(&path, Some("_"));
+            collect_files(&path, Some("_"), None);
         }
+
+        // Collect WebAssembly files
+        let wasm_dir = local_path.join("wasm");
+        if wasm_dir.exists() {
+            println!("cargo:rerun-if-changed={}", wasm_dir.display());
+            let wasm_out_dir = out_dir.join("bin");
+            fs::create_dir_all(&wasm_out_dir).expect("failed to create wasm directory");
+            
+            // Copy all .wasm files to the filesystem without the .wasm extension
+            for entry in fs::read_dir(&wasm_dir).unwrap().filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("wasm") {
+                    // Remove .wasm extension from the filename
+                    let filename = path.file_stem().unwrap();
+                    let dest = wasm_out_dir.join(filename);
+                    fs::copy(&path, &dest).expect("failed to copy wasm file");
+                    ufiles.push(dest);
+                }
+            }
+        }
+
         (local_path, ufiles)
     } else {
         panic!("failed to build user programs");
