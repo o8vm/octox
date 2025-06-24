@@ -152,6 +152,4 @@ contributed by Takahiro Itazuri and Kuniyuki Iwashima.
 
 * Contribution
 
-This is a learning project for me, and I will not be accepting pull requests
-until I consider the implementation complete. However, discussions and advice
-are welcome.
+This is a hobby learning project, but contributions are welcome! However, please note that reviews may take considerable time. Discussions and advice are always appreciated.
