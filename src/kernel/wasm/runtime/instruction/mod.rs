@@ -17,7 +17,7 @@ use crate::wasm::runtime::{
     Frame,
     ModuleInstance,
 };
-use crate::wasm::ast::{NumericInstruction, ControlInstruction, VectorInstruction};
+use crate::wasm::ast::{NumericInstruction, ControlInstruction, VectorInstruction, ReferenceInstruction};
 
 mod numeric;
 pub use numeric::execute_numeric;
@@ -97,10 +97,8 @@ impl InstructionExecutor for DefaultInstructionExecutor {
             Instruction::Numeric(_) => {
                 execute_numeric(store, thread, instruction)
             }
-            // Reference instructions (as part of Control instructions)
-            Instruction::Control(ControlInstruction::RefNull(_)) |
-            Instruction::Control(ControlInstruction::RefIsNull) |
-            Instruction::Control(ControlInstruction::RefFunc(_)) => {
+            // Reference instructions
+            Instruction::Reference(_) => {
                 execute_reference(store, thread, instruction)
             }
             // Control instructions
@@ -115,7 +113,8 @@ impl InstructionExecutor for DefaultInstructionExecutor {
             Instruction::Control(ControlInstruction::Return) |
             Instruction::Control(ControlInstruction::Call { .. }) |
             Instruction::Control(ControlInstruction::CallIndirect { .. }) |
-            Instruction::Control(ControlInstruction::End) => {
+            Instruction::Control(ControlInstruction::End) |
+            Instruction::Control(ControlInstruction::Else) => {
                 execute_control(store, thread, instruction)
             }
             // Vector instructions
@@ -159,11 +158,6 @@ impl InstructionExecutor for DefaultInstructionExecutor {
                     ))),
                 }
             }
-            // TODO: Implement other instruction categories
-            _ => Err(RuntimeError::Execution(format!(
-                "Unimplemented instruction: {:?}",
-                instruction
-            ))),
         }
     }
 }

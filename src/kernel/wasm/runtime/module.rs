@@ -1116,13 +1116,13 @@ impl ModuleInstance {
                 ))
             }
             crate::wasm::ast::ConstExpr::RefFunc(func_index) => {
-                Ok(crate::wasm::ast::Instruction::Control(
-                    crate::wasm::ast::ControlInstruction::RefFunc(*func_index)
+                Ok(crate::wasm::ast::Instruction::Reference(
+                    crate::wasm::ast::ReferenceInstruction::RefFunc(*func_index)
                 ))
             }
             crate::wasm::ast::ConstExpr::RefNull(ref_type) => {
-                Ok(crate::wasm::ast::Instruction::Control(
-                    crate::wasm::ast::ControlInstruction::RefNull(*ref_type)
+                Ok(crate::wasm::ast::Instruction::Reference(
+                    crate::wasm::ast::ReferenceInstruction::RefNull(*ref_type)
                 ))
             }
         }

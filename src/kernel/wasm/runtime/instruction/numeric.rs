@@ -38,6 +38,9 @@ use crate::wasm::runtime::{
     },
 };
 
+// Import debug_log macro
+use crate::debug_log;
+
 /// Executes a numeric constant instruction
 /// 
 /// # Arguments
@@ -509,10 +512,11 @@ fn execute_testop(
     Ok(())
 }
 
-/// Executes a relational operation
+/// Executes an integer relational operation
 /// 
 /// # Arguments
 /// 
+/// * `store` - The current store state
 /// * `thread` - The current thread state
 /// * `op` - The relational operation to execute
 /// * `width` - The bit width of the operation
@@ -521,6 +525,7 @@ fn execute_testop(
 /// 
 /// * `RuntimeResult<()>` - The result of the execution
 fn execute_relop(
+    store: &mut Store,
     thread: &mut Thread,
     op: &IntRelOp,
     width: BitWidth,
@@ -543,43 +548,65 @@ fn execute_relop(
         ))
     })?;
     
+    debug_log!(store.config(), "=== RELATIONAL OPERATION ===");
+    debug_log!(store.config(), "Operation: {:?}", op);
+    debug_log!(store.config(), "Operand1: {:?}", operand1);
+    debug_log!(store.config(), "Operand2: {:?}", operand2);
+    
     // Execute the operation based on the bit width
     match width {
         BitWidth::W32 => {
             match (operand1.clone(), operand2.clone()) {
                 (Value::I32(value1), Value::I32(value2)) => {
                     let result = match op {
-                        IntRelOp::Eq { signed: _ } => value1 == value2,
-                        IntRelOp::Ne { signed: _ } => value1 != value2,
+                        IntRelOp::Eq { signed: _ } => {
+                            let res = value1 == value2;
+                            debug_log!(store.config(), "Eq: {} == {} = {}", value1, value2, res);
+                            res
+                        },
+                        IntRelOp::Ne { signed: _ } => {
+                            let res = value1 != value2;
+                            debug_log!(store.config(), "Ne: {} != {} = {}", value1, value2, res);
+                            res
+                        },
                         IntRelOp::Lt { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 < value2
                             } else {
                                 (value1 as u32) < (value2 as u32)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Lt (signed={}): {} < {} = {}", signed, value1, value2, res);
+                            res
+                        },
                         IntRelOp::Gt { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 > value2
                             } else {
                                 (value1 as u32) > (value2 as u32)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Gt (signed={}): {} > {} = {}", signed, value1, value2, res);
+                            res
+                        },
                         IntRelOp::Le { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 <= value2
                             } else {
                                 (value1 as u32) <= (value2 as u32)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Le (signed={}): {} <= {} = {}", signed, value1, value2, res);
+                            res
+                        },
                         IntRelOp::Ge { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 >= value2
                             } else {
                                 (value1 as u32) >= (value2 as u32)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Ge (signed={}): {} >= {} = {}", signed, value1, value2, res);
+                            res
+                        },
                     };
+                    debug_log!(store.config(), "Result: {} (as i32: {})", result, result as i32);
                     stack.push_value(Value::I32(result as i32));
                 }
                 _ => return Err(RuntimeError::TypeError(format!(
@@ -595,37 +622,54 @@ fn execute_relop(
             match (operand1.clone(), operand2.clone()) {
                 (Value::I64(value1), Value::I64(value2)) => {
                     let result = match op {
-                        IntRelOp::Eq { signed: _ } => value1 == value2,
-                        IntRelOp::Ne { signed: _ } => value1 != value2,
+                        IntRelOp::Eq { signed: _ } => {
+                            let res = value1 == value2;
+                            debug_log!(store.config(), "Eq: {} == {} = {}", value1, value2, res);
+                            res
+                        },
+                        IntRelOp::Ne { signed: _ } => {
+                            let res = value1 != value2;
+                            debug_log!(store.config(), "Ne: {} != {} = {}", value1, value2, res);
+                            res
+                        },
                         IntRelOp::Lt { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 < value2
                             } else {
                                 (value1 as u64) < (value2 as u64)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Lt (signed={}): {} < {} = {}", signed, value1, value2, res);
+                            res
+                        },
                         IntRelOp::Gt { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 > value2
                             } else {
                                 (value1 as u64) > (value2 as u64)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Gt (signed={}): {} > {} = {}", signed, value1, value2, res);
+                            res
+                        },
                         IntRelOp::Le { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 <= value2
                             } else {
                                 (value1 as u64) <= (value2 as u64)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Le (signed={}): {} <= {} = {}", signed, value1, value2, res);
+                            res
+                        },
                         IntRelOp::Ge { signed } => {
-                            if *signed {
+                            let res = if *signed {
                                 value1 >= value2
                             } else {
                                 (value1 as u64) >= (value2 as u64)
-                            }
-                        }
+                            };
+                            debug_log!(store.config(), "Ge (signed={}): {} >= {} = {}", signed, value1, value2, res);
+                            res
+                        },
                     };
+                    debug_log!(store.config(), "Result: {} (as i32: {})", result, result as i32);
                     stack.push_value(Value::I32(result as i32));
                 }
                 _ => return Err(RuntimeError::TypeError(format!(
@@ -1178,10 +1222,10 @@ pub fn execute_numeric(
                 }
                 // Relational operations
                 NumericInstruction::I32RelOp(op) => {
-                    execute_relop(thread, op, BitWidth::W32)
+                    execute_relop(store, thread, op, BitWidth::W32)
                 }
                 NumericInstruction::I64RelOp(op) => {
-                    execute_relop(thread, op, BitWidth::W64)
+                    execute_relop(store, thread, op, BitWidth::W64)
                 }
                 NumericInstruction::F32RelOp(op) => {
                     execute_float_relop(thread, op, BitWidth::W32)
@@ -1202,11 +1246,6 @@ pub fn execute_numeric(
                 NumericInstruction::F64ConversionOp(op) => {
                     execute_conversion(thread, op, BitWidth::W64)
                 }
-                // TODO: Implement other numeric instructions
-                _ => Err(RuntimeError::Execution(format!(
-                    "Unimplemented numeric instruction: {:?}",
-                    numeric_instr
-                ))),
             }
         }
         _ => Err(RuntimeError::Execution(format!(

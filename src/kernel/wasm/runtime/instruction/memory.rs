@@ -17,6 +17,7 @@ use crate::wasm::runtime::{
     numeric::{BitWidth, NumericResult, UnsignedOps, SignedOps, FloatOps},
 };
 use crate::wasm::ast::{Instruction, MemoryInstruction, ValType, WASM_PAGE_SIZE};
+use crate::debug_log;
 
 /// Memory instruction implementation.
 pub struct Memory;
@@ -524,37 +525,27 @@ impl Memory {
 
         crate::wasm::runtime::debug_log(&config, &format!("memory.fill: filling range {}..{} ({} bytes)", d, end, n));
 
-        // Test memory access before filling
-        crate::wasm::runtime::debug_log(&config, &format!("memory.fill: testing memory access at offset {}", d));
-        match mem.read_byte(d) {
-            Ok(_) => crate::wasm::runtime::debug_log(&config, "memory.fill: memory access test successful"),
-            Err(e) => {
-                crate::wasm::runtime::debug_log(&config, &format!("memory.fill: memory access test failed: {}", e));
-                return Err(RuntimeError::Memory(format!("memory.fill: memory access test failed: {}", e)));
-            }
-        }
-
-        // Test memory access at the end of the range
-        if end > d {
-            crate::wasm::runtime::debug_log(&config, &format!("memory.fill: testing memory access at offset {} (end-1)", end - 1));
-            match mem.read_byte(end - 1) {
-                Ok(_) => crate::wasm::runtime::debug_log(&config, "memory.fill: end memory access test successful"),
+        // Test memory access before filling - only test a few points to avoid performance issues
+        if n > 0 {
+            // Test start of range
+            crate::wasm::runtime::debug_log(&config, &format!("memory.fill: testing memory access at offset {}", d));
+            match mem.read_byte(d) {
+                Ok(_) => crate::wasm::runtime::debug_log(&config, "memory.fill: memory access test successful"),
                 Err(e) => {
-                    crate::wasm::runtime::debug_log(&config, &format!("memory.fill: end memory access test failed: {}", e));
-                    return Err(RuntimeError::Memory(format!("memory.fill: end memory access test failed: {}", e)));
+                    crate::wasm::runtime::debug_log(&config, &format!("memory.fill: memory access test failed: {}", e));
+                    return Err(RuntimeError::Memory(format!("memory.fill: memory access test failed: {}", e)));
                 }
             }
-        }
 
-        // Test memory access at the middle of the range
-        if end > d + 1 {
-            let mid = d + (end - d) / 2;
-            crate::wasm::runtime::debug_log(&config, &format!("memory.fill: testing memory access at offset {} (middle)", mid));
-            match mem.read_byte(mid) {
-                Ok(_) => crate::wasm::runtime::debug_log(&config, "memory.fill: middle memory access test successful"),
-                Err(e) => {
-                    crate::wasm::runtime::debug_log(&config, &format!("memory.fill: middle memory access test failed: {}", e));
-                    return Err(RuntimeError::Memory(format!("memory.fill: middle memory access test failed: {}", e)));
+            // Test end of range (if different from start)
+            if end > d + 1 {
+                crate::wasm::runtime::debug_log(&config, &format!("memory.fill: testing memory access at offset {} (end-1)", end - 1));
+                match mem.read_byte(end - 1) {
+                    Ok(_) => crate::wasm::runtime::debug_log(&config, "memory.fill: end memory access test successful"),
+                    Err(e) => {
+                        crate::wasm::runtime::debug_log(&config, &format!("memory.fill: end memory access test failed: {}", e));
+                        return Err(RuntimeError::Memory(format!("memory.fill: end memory access test failed: {}", e)));
+                    }
                 }
             }
         }
@@ -951,11 +942,6 @@ pub fn execute_memory(
             MemoryInstruction::DataDrop { data_index } => {
                 Memory::data_drop(store, thread, *data_index)
             }
-            // TODO: Implement other memory instructions
-            _ => Err(RuntimeError::Execution(format!(
-                "Unimplemented memory instruction: {:?}",
-                memory_inst
-            ))),
         },
         _ => Err(RuntimeError::Execution(format!(
             "Expected memory instruction, got: {:?}",

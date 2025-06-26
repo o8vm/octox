@@ -11,6 +11,7 @@ use crate::wasm::runtime::{
     RuntimeError,
     Store,
     Thread,
+    Frame,
 };
 use crate::wasm::ast::{Instruction, VariableInstruction};
 use crate::debug_log;
@@ -22,23 +23,81 @@ impl Variable {
     /// Executes the local.get instruction.
     /// 
     /// Pops nothing, pushes the value of the local variable at index x.
+    /// 
+    /// # Specification
+    /// 
+    /// 1. Let 𝐹 be the current frame.
+    /// 2. Assert: due to validation, 𝐹.locals[𝑥] exists.
+    /// 3. Let val be the value 𝐹.locals[𝑥].
+    /// 4. Push the value val to the stack.
+    /// 
+    /// 𝐹; (local.get 𝑥) → 𝐹; val (if 𝐹.locals[𝑥] = val )
     pub fn local_get(store: &Store, thread: &mut Thread, local_idx: u32) -> RuntimeResult<()> {
-        // Get the current active frame
-        let frame = thread.current_frame_state();
-        debug_log!(store.config(), "[local.get] index={}, frame locals len={}, frame locals={:?}, frame stack depth={}",
-            local_idx,
-            frame.locals().len(),
-            frame.locals(),
-            thread.stack().frame_count()
-        );
-        // Get the local value
-        let val = frame.locals().get(local_idx as usize).ok_or_else(|| {
+        debug_log!(store.config(), "[local.get] index={}, frame stack depth={}", local_idx, thread.stack().frame_count());
+        
+        // 1. Let 𝐹 be the current frame.
+        // We need to find the WASM function frame, not the host function frame
+        let mut target_frame: Option<&Frame> = None;
+        
+        // Search for the WASM function frame (typically at index 1, after host function frame)
+        for i in 0..thread.stack().frame_count() {
+            if let Some(frame) = thread.stack().get_frame(i) {
+                debug_log!(store.config(), "[local.get] frame {} has {} locals: {:?}", i, frame.state().locals().len(), frame.state().locals());
+                if frame.state().locals().len() > local_idx as usize {
+                    // Check if this is a WASM function frame (not host function frame)
+                    // Host function frames typically have more locals than needed for simple WASM functions
+                    // We want the frame that corresponds to the WASM function being executed
+                    // Look for the frame with the smallest number of locals that still has enough for our index
+                    // This is likely the WASM function frame rather than a host function frame
+                    if target_frame.is_none() || frame.state().locals().len() < target_frame.unwrap().state().locals().len() {
+                        target_frame = Some(frame);
+                        debug_log!(store.config(), "[local.get] found potential WASM function frame {} with {} locals", i, frame.state().locals().len());
+                    }
+                }
+            }
+        }
+        
+        // If we didn't find a WASM function frame, try the current frame state
+        if target_frame.is_none() {
+            debug_log!(store.config(), "[local.get] using current frame state for local {}", local_idx);
+            let current_frame = thread.current_frame_state();
+            if current_frame.locals().len() > local_idx as usize {
+                // 2. Assert: due to validation, 𝐹.locals[𝑥] exists.
+                // 3. Let val be the value 𝐹.locals[𝑥].
+                let val = current_frame.locals().get(local_idx as usize).ok_or_else(|| {
+                    RuntimeError::Execution(format!(
+                        "local.get: Local index {} does not exist in current frame.",
+                        local_idx
+                    ))
+                })?.clone();
+                
+                debug_log!(store.config(), "[local.get] found value {:?} in current frame", val);
+                
+                // 4. Push the value val to the stack.
+                thread.stack_mut().push_value(val);
+                return Ok(());
+            }
+        }
+        
+        let target_frame = target_frame.ok_or_else(|| {
             RuntimeError::Execution(format!(
-                "local.get: Local index {} does not exist in current frame.",
+                "local.get: Local index {} does not exist in any WASM function frame.",
+                local_idx
+            ))
+        })?;
+        
+        // 2. Assert: due to validation, 𝐹.locals[𝑥] exists.
+        // 3. Let val be the value 𝐹.locals[𝑥].
+        let val = target_frame.state().locals().get(local_idx as usize).ok_or_else(|| {
+            RuntimeError::Execution(format!(
+                "local.get: Local index {} does not exist in target frame.",
                 local_idx
             ))
         })?.clone();
-        // Push the value to the stack
+        
+        debug_log!(store.config(), "[local.get] found value {:?} in target frame", val);
+        
+        // 4. Push the value val to the stack.
         thread.stack_mut().push_value(val);
         Ok(())
     }
@@ -57,7 +116,7 @@ impl Variable {
     /// 
     /// 𝐹; val (local.set 𝑥) → 𝐹′; 𝜖 (if 𝐹′ = 𝐹 with locals[𝑥] = val )
     /// 
-    /// Note: This implementation temporarily finds a frame with locals due to function call return mechanism issues.
+    /// Note: This implementation finds the WASM function frame (not host function frame) for local variable access.
     pub fn local_set(thread: &mut Thread, local_idx: u32, store: &Store) -> RuntimeResult<()> {
         debug_log!(store.config(), "local_set: before pop, stack: {}", thread.stack());
         
@@ -67,23 +126,48 @@ impl Variable {
             RuntimeError::Stack("No value on stack for local.set instruction".to_string())
         })?;
         
-        // Temporary fix: Find a frame with locals due to function call return mechanism issues
+        // Find the WASM function frame (not host function frame) for local variable access
         let mut target_frame_index = None;
-        debug_log!(store.config(), "local_set: searching for frame with locals...");
+        debug_log!(store.config(), "local_set: searching for WASM function frame with locals...");
         for i in 0..thread.stack().frame_count() {
             if let Some(frame) = thread.stack().get_frame(i) {
                 debug_log!(store.config(), "local_set: frame {} has {} locals: {:?}", i, frame.state().locals().len(), frame.state().locals());
                 // Check if this frame has enough locals for the given index
                 if frame.state().locals().len() > local_idx as usize {
-                    target_frame_index = Some(i);
-                    debug_log!(store.config(), "local_set: found frame {} with enough locals for index {}", i, local_idx);
-                    break;
+                    // Check if this is a WASM function frame (not host function frame)
+                    // Host function frames typically have more locals than needed for simple WASM functions
+                    // We want the frame that corresponds to the WASM function being executed
+                    // Look for the frame with the smallest number of locals that still has enough for our index
+                    // This is likely the WASM function frame rather than a host function frame
+                    if target_frame_index.is_none() || frame.state().locals().len() < thread.stack().get_frame(target_frame_index.unwrap()).unwrap().state().locals().len() {
+                        target_frame_index = Some(i);
+                        debug_log!(store.config(), "local_set: found potential WASM function frame {} with {} locals for index {}", i, frame.state().locals().len(), local_idx);
+                    }
                 }
             }
         }
         
+        // If we didn't find a WASM function frame, try the current frame state
+        if target_frame_index.is_none() {
+            debug_log!(store.config(), "local_set: using current frame state for local {}", local_idx);
+            let current_frame = thread.current_frame_state();
+            if current_frame.locals().len() > local_idx as usize {
+                // Use the current frame state directly
+                let mut frame_state = thread.current_frame_state_mut();
+                let locals = frame_state.locals_mut();
+                let local = locals.get_mut(local_idx as usize).ok_or_else(|| {
+                    RuntimeError::Execution(format!(
+                        "local.set: Local index {} does not exist in current frame.",
+                        local_idx
+                    ))
+                })?;
+                *local = val;
+                return Ok(());
+            }
+        }
+        
         let target_frame_index = target_frame_index.ok_or_else(|| {
-            RuntimeError::Execution("No frame with locals found for local.set instruction".to_string())
+            RuntimeError::Execution("No WASM function frame with locals found for local.set instruction".to_string())
         })?;
         
         debug_log!(store.config(), "local_set: setting local {} to {:?} in frame index {}", local_idx, val, target_frame_index);
@@ -251,11 +335,6 @@ pub fn execute_variable(
             VariableInstruction::GlobalSet(idx) => {
                 Variable::global_set(store, thread, *idx)
             }
-            // TODO: Implement other variable instructions
-            _ => Err(RuntimeError::Execution(format!(
-                "Unimplemented variable instruction: {:?}",
-                var_inst
-            ))),
         },
         _ => Err(RuntimeError::Execution(format!(
             "Expected variable instruction, got: {:?}",

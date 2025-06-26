@@ -764,11 +764,6 @@ pub fn execute_table(
             TableInstruction::ElemDrop(idx) => {
                 Table::table_elem_drop(store, thread, *idx)
             }
-            // TODO: Implement other table instructions
-            _ => Err(RuntimeError::Execution(format!(
-                "Unimplemented table instruction: {:?}",
-                table_inst
-            ))),
         },
         _ => Err(RuntimeError::Execution(format!(
             "Expected table instruction, got: {:?}",

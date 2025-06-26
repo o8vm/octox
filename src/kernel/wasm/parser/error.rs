@@ -33,6 +33,13 @@ pub enum ParseError {
     InvalidGlobalType,
     /// Invalid instruction
     InvalidInstruction,
+    /// Invalid instruction with opcode and position information
+    InvalidInstructionWithDetails {
+        /// The invalid opcode
+        opcode: u8,
+        /// The position where the error occurred
+        position: usize,
+    },
     /// Invalid constant expression
     InvalidConstExpr,
     /// Invalid UTF-8 string
@@ -99,6 +106,7 @@ impl fmt::Display for ParseError {
             Self::InvalidTableType => write!(f, "invalid table type"),
             Self::InvalidGlobalType => write!(f, "invalid global type"),
             Self::InvalidInstruction => write!(f, "invalid instruction"),
+            Self::InvalidInstructionWithDetails { opcode, position } => write!(f, "invalid instruction at position {} with opcode {}", position, opcode),
             Self::InvalidConstExpr => write!(f, "invalid constant expression"),
             Self::InvalidUtf8 => write!(f, "invalid UTF-8 string"),
             Self::InvalidIntegerEncoding => write!(f, "invalid integer encoding"),

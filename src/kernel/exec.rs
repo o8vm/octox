@@ -103,7 +103,7 @@ pub fn exec(
 
             // Execute the WebAssembly module using the unified interface
             // debug option
-            let config = runtime::RuntimeConfig { debug: false, ..runtime::RuntimeConfig::default() };
+            let config = runtime::RuntimeConfig { debug: true, ..runtime::RuntimeConfig::default() };
             match wasm::execute_auto(&wasm_bytes, Some(config)) {
                 Ok(result) => {
                     // For WASM execution, we don't need to set up user memory

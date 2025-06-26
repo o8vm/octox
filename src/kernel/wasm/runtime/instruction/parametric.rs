@@ -24,7 +24,7 @@ pub fn execute_parametric(
                 }
                 Ok(())
             }
-            ParametricInstruction::Select { operand_types: _ } => {
+            ParametricInstruction::Select(_) => {
                 // Pop c (i32), val2, val1 from the stack (in reverse order)
                 let c = thread.stack_mut().pop_value().ok_or_else(|| {
                     RuntimeError::Stack("No condition value (i32) on stack for select instruction".to_string())
@@ -59,11 +59,6 @@ pub fn execute_parametric(
                 }
                 Ok(())
             }
-            // TODO: Implement select and other parametric instructions
-            _ => Err(RuntimeError::Execution(format!(
-                "Unimplemented parametric instruction: {:?}",
-                parametric_instr
-            ))),
         },
         _ => Err(RuntimeError::Execution(format!(
             "Expected parametric instruction, got: {:?}",

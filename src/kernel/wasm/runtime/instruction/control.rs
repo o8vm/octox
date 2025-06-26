@@ -196,10 +196,15 @@ impl Control {
     /// end
     /// ```
     pub fn loop_(
+        store: &mut Store,
         thread: &mut Thread,
         block_type: &BlockType,
         instructions: &[Instruction],
     ) -> RuntimeResult<()> {
+        debug_log!(store.config(), "=== LOOP instruction ===");
+        debug_log!(store.config(), "Block type: {:?}", block_type);
+        debug_log!(store.config(), "Instructions: {:?}", instructions);
+        
         // Get the current frame
         let frame = thread.frame_state();
         
@@ -209,6 +214,8 @@ impl Control {
         // Get the number of parameters (m) and results (n)
         let param_count = func_type.params.len();
         let result_count = func_type.results.len();
+        
+        debug_log!(store.config(), "Param count: {}, Result count: {}", param_count, result_count);
         
         // Validate that there are at least m values on the stack
         let stack = thread.stack();
@@ -229,20 +236,23 @@ impl Control {
             param_values.push(value);
         }
         
-        // Create a label with arity m (parameter count) and continuation pointing to the start of the loop
+        // Create a label with arity n (result count) and continuation pointing to the start of the loop
         // The continuation is the loop instruction itself, which will be executed when branching to this label
-        // This matches the specification: "Let 𝐿 be the label whose arity is 𝑚 and whose continuation is the start of the loop"
+        // This matches the specification: "Let 𝐿 be the label whose arity is 𝑛 and whose continuation is the start of the loop"
         let loop_instruction = Instruction::Control(ControlInstruction::Loop {
             block_type: block_type.clone(),
             instructions: instructions.to_vec(),
         });
         let mut continuation = Vec::new();
         continuation.push(loop_instruction);
-        let label = Label::new(param_count, continuation);
+        let label = Label::new(result_count, continuation);
+        
+        debug_log!(store.config(), "Created loop label with arity: {}", result_count);
         
         // Push the label onto the stack
-        // This creates the state: 𝐹; label𝑚{loop bt instr * end} val𝑚 instr * end
+        // This creates the state: 𝐹; label𝑛{loop bt instr * end} val𝑚 instr * end
         thread.stack_mut().push_label(label);
+        // println!("[STACK] after loop label push: {}", thread.stack());
         
         // Push the parameter values back onto the stack
         for value in param_values.into_iter().rev() {
@@ -250,16 +260,14 @@ impl Control {
         }
         
         // Execute the loop instructions
-        for instruction in instructions {
-            // TODO: Execute the instruction
-            // This will be implemented when we have a proper instruction executor
-            // For now, we'll just return an error
-            return Err(RuntimeError::Execution(format!(
-                "loop: Instruction execution not yet implemented: {:?}",
-                instruction
-            )));
+        debug_log!(store.config(), "Executing {} loop instructions", instructions.len());
+        let executor = crate::wasm::runtime::instruction::DefaultInstructionExecutor;
+        for (i, instruction) in instructions.iter().enumerate() {
+            debug_log!(store.config(), "Executing loop instruction {}: {:?}", i, instruction);
+            executor.execute(store, thread, instruction)?;
         }
         
+        debug_log!(store.config(), "Loop instruction execution completed");
         Ok(())
     }
 
@@ -385,6 +393,19 @@ impl Control {
     /// end
     /// ```
     pub fn br(store: &mut Store, thread: &mut Thread, label_index: u32) -> RuntimeResult<()> {
+        // println!("[STACK] before br {}: {}", label_index, thread.stack());
+        debug_log!(store.config(), "=== BR instruction ===");
+        debug_log!(store.config(), "Label index: {}", label_index);
+        debug_log!(store.config(), "Stack label count: {}", thread.stack().label_count());
+        debug_log!(store.config(), "Stack value count: {}", thread.stack().value_count());
+        
+        // Debug: Show all labels on the stack
+        for i in 0..thread.stack().label_count() {
+            if let Some(label) = thread.stack().get_label(i) {
+                debug_log!(store.config(), "Label {}: arity={}, continuation={:?}", i, label.arity(), label.continuation());
+            }
+        }
+        
         // Step 1: Validate that there are at least l + 1 labels on the stack
         if thread.stack().label_count() < (label_index + 1) as usize {
             return Err(RuntimeError::Execution(format!(
@@ -393,17 +414,24 @@ impl Control {
                 thread.stack().label_count()
             )));
         }
-        // Step 2-3: Get the l-th label and its arity
+        
+        // Step 2-3: Get the l-th label and its arity (relative index, skipping non-labels)
         let (arity, continuation) = {
             let stack = thread.stack();
-            let target_label = stack.get_label(label_index as usize).ok_or_else(|| {
+            // println!("[STACK] before get_label_by_relative_index({}): {}", label_index, stack);
+            let target_label = stack.get_label_by_relative_index(label_index as usize).ok_or_else(|| {
                 RuntimeError::Execution(format!(
-                    "br: Label at index {} not found",
+                    "br: Label at relative index {} not found",
                     label_index
                 ))
             })?;
+            debug_log!(store.config(), "Retrieved label at relative index {}: arity={}, continuation={:?}", label_index, target_label.arity(), target_label.continuation());
             (target_label.arity(), target_label.continuation().to_vec())
         };
+        
+        debug_log!(store.config(), "Target label arity: {}", arity);
+        debug_log!(store.config(), "Continuation instructions: {:?}", continuation);
+        
         // Step 4-5: Validate and pop the values for the label
         if thread.stack().value_count() < arity {
             return Err(RuntimeError::Execution(format!(
@@ -419,26 +447,43 @@ impl Control {
             })?;
             branch_values.push(value);
         }
-        // Step 6: Repeat l + 1 times: clear values and pop labels
-        for _ in 0..=label_index {
+        debug_log!(store.config(), "Popped {} values for branch", branch_values.len());
+        
+        // Step 6: Repeat l + 1 times: clear values and pop labels (labels only, skipping non-labels)
+        for i in 0..=label_index {
+            debug_log!(store.config(), "Cleaning up stack level {} (relative label)", i);
+            // While the top of the stack is a value, pop the value
             while thread.stack().is_top_value() {
                 thread.stack_mut().pop_value().ok_or_else(|| {
                     RuntimeError::Stack("Failed to pop value during br cleanup".to_string())
                 })?;
             }
+            // Assert: the top of the stack now is a label and pop it
+            if !thread.stack().is_top_label() {
+                return Err(RuntimeError::Stack(format!("Expected label at stack level {} during br cleanup", i)));
+            }
             thread.stack_mut().pop_label().ok_or_else(|| {
                 RuntimeError::Stack("Expected label on stack during br cleanup".to_string())
             })?;
         }
+        debug_log!(store.config(), "Cleaned up stack to label index {} (relative)", label_index);
+        
         // Step 7: Push the values val_n to the stack
+        let branch_values_len = branch_values.len();
         for value in branch_values.into_iter().rev() {
             thread.stack_mut().push_value(value);
         }
+        debug_log!(store.config(), "Pushed {} values back to stack", branch_values_len);
+        
         // Step 8: Jump to the continuation of L
+        debug_log!(store.config(), "Executing {} continuation instructions", continuation.len());
         let executor = crate::wasm::runtime::instruction::DefaultInstructionExecutor;
-        for instr in &continuation {
+        for (i, instr) in continuation.iter().enumerate() {
+            debug_log!(store.config(), "Executing continuation instruction {}: {:?}", i, instr);
             executor.execute(store, thread, instr)?;
         }
+        debug_log!(store.config(), "BR instruction completed");
+        //println!("[STACK] after br {}: {}", label_index, thread.stack());
         Ok(())
     }
 
@@ -455,6 +500,10 @@ impl Control {
     /// 4. Else:
     ///    a. Do nothing.
     pub fn br_if(store: &mut Store, thread: &mut Thread, label_index: u32) -> RuntimeResult<()> {
+        //println!("[STACK] before br_if {}: {}", label_index, thread.stack());
+        debug_log!(store.config(), "=== BR_IF instruction ===");
+        debug_log!(store.config(), "Label index: {}", label_index);
+        
         // Step 1-2: Pop the value i32.const 𝑐 from the stack
         let condition_value = thread.stack_mut().pop_value().ok_or_else(|| {
             RuntimeError::Stack("No value on stack for br_if instruction".to_string())
@@ -466,11 +515,18 @@ impl Control {
                 condition_value
             ))),
         };
+        
+        debug_log!(store.config(), "Condition value: {}", condition);
+        
         // Step 3: If 𝑐 is non-zero, execute br 𝑙
         if condition != 0 {
+            debug_log!(store.config(), "Condition is non-zero, executing branch");
             Self::br(store, thread, label_index)?;
+        } else {
+            debug_log!(store.config(), "Condition is zero, not branching");
         }
         // Step 4: Else, do nothing
+        // println!("[STACK] after br_if {}: {}", label_index, thread.stack());
         Ok(())
     }
 
@@ -840,7 +896,7 @@ pub fn execute_control(
                 Control::block(store, thread, block_type, instructions)
             }
             ControlInstruction::Loop { block_type, instructions } => {
-                Control::loop_(thread, block_type, instructions)
+                Control::loop_(store, thread, block_type, instructions)
             }
             ControlInstruction::If { block_type, true_instructions, false_instructions } => {
                 Control::if_(store, thread, block_type, true_instructions, false_instructions)
@@ -871,11 +927,6 @@ pub fn execute_control(
                 // It should only appear within if instructions
                 Err(RuntimeError::Execution("Else instruction should not be executed directly".to_string()))
             }
-            // TODO: Implement other control instructions
-            _ => Err(RuntimeError::Execution(format!(
-                "Unimplemented control instruction: {:?}",
-                control_inst
-            ))),
         },
         _ => Err(RuntimeError::Execution(format!(
             "Expected control instruction, got: {:?}",

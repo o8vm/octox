@@ -16,6 +16,7 @@ use crate::wasm::runtime::{
     stack::{Label},
     frame::{Frame, FrameState},
     address::FuncAddr,
+    module::ModuleInstance,
 };
 use crate::wasm::ast::{Instruction, FuncType, ValType};
 use crate::wasm::runtime::instruction::InstructionExecutor;
@@ -204,7 +205,8 @@ impl Function {
         // Execute the function body
         if let Some(code) = code_info {
             // Parse the function code bytes into an expression (f.code.body)
-            let mut parser = crate::wasm::parser::Parser::new(&code.code);
+            let parser_config = crate::wasm::parser::ParserConfig { debug: store.config().debug };
+            let mut parser = crate::wasm::parser::Parser::with_config(&code.code, parser_config);
             debug_log!(store.config(), "Parsing function code: {:?}", code.code);
             let instructions = parser.parse_expr().map_err(|e| {
                 RuntimeError::Execution(format!("Failed to parse function code: {:?}", e))
@@ -1082,11 +1084,27 @@ impl Function {
             let mut locals = param_values.clone();
             
             if let Some(code) = &code_info {
-                // Process locals t_k from f.code.locals
+                // Process locals t_k from f.code.locals in smaller chunks to avoid large allocations
                 for local_decl in &code.locals {
-                    for _ in 0..local_decl.count {
-                        let default_value = Self::default_value_for_type(&local_decl.ty)?;
-                        locals.push(default_value);
+                    // Allocate locals in smaller chunks to avoid large memory allocations
+                    let chunk_size = 10; // Process 10 locals at a time
+                    let mut remaining = local_decl.count;
+                    
+                    while remaining > 0 {
+                        let current_chunk = core::cmp::min(chunk_size, remaining);
+                        
+                        for _ in 0..current_chunk {
+                            let default_value = Self::default_value_for_type(&local_decl.ty)?;
+                            locals.push(default_value);
+                        }
+                        
+                        remaining -= current_chunk;
+                        
+                        // Add a small delay or check to avoid overwhelming the memory allocator
+                        if remaining > 0 {
+                            // Force a small allocation to ensure memory is properly mapped
+                            let _ = Vec::<u8>::with_capacity(1);
+                        }
                     }
                 }
             }
@@ -1115,7 +1133,8 @@ impl Function {
             debug_log!(store.config(), "Pushed label to stack. Stack depth: {}", thread.stack().frame_count());
             debug_log!(store.config(), "Label continuation: {:?}", label.continuation());
             
-            let mut parser = crate::wasm::parser::Parser::new(&code.code);
+            let parser_config = crate::wasm::parser::ParserConfig { debug: store.config().debug };
+            let mut parser = crate::wasm::parser::Parser::with_config(&code.code, parser_config);
             let instructions = parser.parse_expr().map_err(|e| {
                 RuntimeError::Execution(format!("Failed to parse function code: {:?}", e))
             })?;

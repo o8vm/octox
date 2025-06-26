@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use alloc::string::String;
 use alloc::format;
 use core::fmt;
 
@@ -452,6 +453,110 @@ impl Stack {
             }
         }
         None
+    }
+
+    /// Gets a block label at the specified relative index from the top of the stack
+    /// 
+    /// Block labels are labels with arity=0 (loop, block, if labels).
+    /// Function exit labels (arity>0) are ignored when counting.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `index` - The relative index of the block label to retrieve (0-based from top)
+    /// 
+    /// # Returns
+    /// 
+    /// * `Option<&Label>` - A reference to the block label if found, None otherwise
+    pub fn get_block_label(&self, index: usize) -> Option<&Label> {
+        let mut block_label_count = 0;
+        for entry in self.entries.iter().rev() {
+            if let StackEntry::Label(label) = entry {
+                // Skip function exit labels (arity > 0) when counting block labels
+                if label.arity() == 0 {
+                    if block_label_count == index {
+                        return Some(label);
+                    }
+                    block_label_count += 1;
+                }
+            }
+        }
+        None
+    }
+
+    /// Gets a label at the specified relative index from the top of the stack
+    /// 
+    /// This method implements the WebAssembly specification for br instruction:
+    /// "Let 𝐿 be the 𝑙-th label appearing on the stack, starting from the top and counting from zero."
+    /// 
+    /// The relative index counts only block/loop labels (skipping function end labels with arity > 0).
+    /// Index 0 refers to the innermost block/loop label, index 1 to the second innermost, etc.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `relative_index` - The relative index of the label to retrieve (0-based from top)
+    /// 
+    /// # Returns
+    /// 
+    /// * `Option<&Label>` - A reference to the label if found, None otherwise
+    pub fn get_label_by_relative_index(&self, relative_index: usize) -> Option<&Label> {
+        let mut label_count = 0;
+        
+        // Iterate through stack entries from top to bottom (newest to oldest)
+        // This matches WASM spec: "starting from the top and counting from zero"
+        for entry in self.entries.iter().rev() {
+            if let StackEntry::Label(label) = entry {
+                // Skip function end labels (arity > 0) when counting block/loop labels
+                if label.arity() == 0 {
+                    if label_count == relative_index {
+                        return Some(label);
+                    }
+                    label_count += 1;
+                }
+            }
+        }
+        
+        None
+    }
+
+    /// Cleans up the stack up to the specified relative label index
+    /// 
+    /// This method implements the WebAssembly specification for br instruction cleanup:
+    /// "Repeat 𝑙 + 1 times:
+    ///  a. While the top of the stack is a value, do:
+    ///     i. Pop the value from the stack.
+    ///  b. Assert: due to validation, the top of the stack now is a label.
+    ///  c. Pop the label from the stack."
+    /// 
+    /// # Arguments
+    /// 
+    /// * `relative_index` - The relative index of the target label
+    /// 
+    /// # Returns
+    /// 
+    /// * `Result<(), String>` - Ok(()) on success, error message on failure
+    pub fn cleanup_to_label(&mut self, relative_index: usize) -> Result<(), String> {
+        // Repeat l + 1 times
+        for i in 0..=relative_index {
+            // While the top of the stack is a value, pop the value
+            while self.is_top_value() {
+                self.pop_value().ok_or("Failed to pop value during cleanup")?;
+            }
+            
+            // Assert: the top of the stack now is a label
+            if !matches!(self.entries.last(), Some(StackEntry::Label(_))) {
+                return Err(format!("Expected label at stack level {}, but found {:?}", i, self.entries.last()));
+            }
+            
+            // Pop the label from the stack
+            self.pop_label().ok_or("Failed to pop label during cleanup")?;
+        }
+        
+        Ok(())
+    }
+
+    /// Returns true if the top of the stack is a label
+    pub fn is_top_label(&self) -> bool {
+        matches!(self.entries.last(), Some(StackEntry::Label(_)))
     }
 }
 

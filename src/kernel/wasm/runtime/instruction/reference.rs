@@ -13,7 +13,7 @@ use crate::wasm::runtime::{
     Store,
     Thread,
 };
-use crate::wasm::ast::{Instruction, ControlInstruction};
+use crate::wasm::ast::{Instruction, ReferenceInstruction};
 
 /// Reference instruction implementation.
 /// 
@@ -126,29 +126,24 @@ pub fn execute_reference(
     instruction: &Instruction,
 ) -> RuntimeResult<()> {
     match instruction {
-        Instruction::Control(control_inst) => {
-            match control_inst {
-                ControlInstruction::RefNull(ref_type) => {
+        Instruction::Reference(ref_inst) => {
+            match ref_inst {
+                ReferenceInstruction::RefNull(ref_type) => {
                     Reference::ref_null(thread, ValueType::from_val_type(*ref_type))
                         .map_err(|e| RuntimeError::Execution(e.to_string()))
                 }
-                ControlInstruction::RefIsNull => {
+                ReferenceInstruction::RefIsNull => {
                     Reference::ref_is_null(thread)
                         .map_err(|e| RuntimeError::Execution(e.to_string()))
                 }
-                ControlInstruction::RefFunc(func_idx) => {
+                ReferenceInstruction::RefFunc(func_idx) => {
                     Reference::ref_func(thread, *func_idx)
                         .map_err(|e| RuntimeError::Execution(e.to_string()))
                 }
-                // TODO: Implement other reference instructions
-                _ => Err(RuntimeError::Execution(format!(
-                    "Expected reference instruction, got: {:?}",
-                    control_inst
-                ))),
             }
         }
         _ => Err(RuntimeError::Execution(format!(
-            "Expected control instruction, got: {:?}",
+            "Expected reference instruction, got: {:?}",
             instruction
         ))),
     }

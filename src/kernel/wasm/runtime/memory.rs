@@ -6,6 +6,7 @@ use core::fmt;
 use core::iter;
 
 use crate::wasm::ast::{MemoryType, WASM_PAGE_SIZE};
+use crate::debug_log;
 
 /// Memory instance
 /// 
@@ -42,8 +43,71 @@ impl MemoryInstance {
     /// with all bytes set to 0.
     pub fn new(ty: MemoryType) -> Self {
         let min_bytes = ty.min_bytes() as usize;
+        
+        // Add a reasonable limit to prevent excessive memory usage in kernel space
+        const MAX_KERNEL_MEMORY_PAGES: u32 = 4; // 4 pages = ~256KB (adjusted for prime.wasm)
+        const MAX_KERNEL_MEMORY_BYTES: usize = MAX_KERNEL_MEMORY_PAGES as usize * WASM_PAGE_SIZE as usize;
+        
+        if min_bytes > MAX_KERNEL_MEMORY_BYTES {
+            panic!("Initial memory size {} bytes exceeds kernel limit of {} bytes", min_bytes, MAX_KERNEL_MEMORY_BYTES);
+        }
+        
+        // Create a default config for logging
+        let config = crate::wasm::runtime::RuntimeConfig::default();
+        debug_log!(&config, "MemoryInstance::new: creating memory with {} bytes ({} pages)", min_bytes, min_bytes / WASM_PAGE_SIZE as usize);
+        
         let mut data = Vec::with_capacity(min_bytes);
-        data.resize(min_bytes, 0);
+        
+        // Try to allocate memory in smaller chunks to avoid page faults
+        let chunk_size = 4096; // 4KB chunks
+        let mut allocated = 0;
+        
+        while allocated < min_bytes {
+            let remaining = min_bytes - allocated;
+            let current_chunk = core::cmp::min(chunk_size, remaining);
+            
+            // Try to extend the vector by the current chunk size
+            let old_len = data.len();
+            data.resize(old_len + current_chunk, 0);
+            
+            // Check if the resize was successful
+            if data.len() == old_len + current_chunk {
+                // Explicitly zero out the newly allocated chunk
+                for i in old_len..data.len() {
+                    data[i] = 0;
+                }
+                allocated += current_chunk;
+                debug_log!(&config, "MemoryInstance::new: allocated {} bytes, total: {}", current_chunk, allocated);
+            } else {
+                // If allocation fails, try with a smaller chunk
+                let smaller_chunk = current_chunk / 2;
+                if smaller_chunk == 0 {
+                    // If we can't allocate even 1 byte, this is a critical error
+                    panic!("Failed to allocate initial WASM memory: could not allocate {} bytes", min_bytes);
+                }
+                data.resize(old_len + smaller_chunk, 0);
+                // Explicitly zero out the newly allocated chunk
+                for i in old_len..data.len() {
+                    data[i] = 0;
+                }
+                allocated += smaller_chunk;
+                debug_log!(&config, "MemoryInstance::new: allocated smaller chunk {} bytes, total: {}", smaller_chunk, allocated);
+            }
+        }
+        
+        debug_log!(&config, "MemoryInstance::new: memory created successfully with {} bytes", data.len());
+        
+        // Verify that the memory is accessible by testing a few bytes
+        if data.len() > 0 {
+            debug_log!(&config, "MemoryInstance::new: testing memory access...");
+            for i in 0..core::cmp::min(10, data.len()) {
+                if data[i] != 0 {
+                    debug_log!(&config, "MemoryInstance::new: warning: byte at offset {} is not zero: 0x{:02x}", i, data[i]);
+                }
+            }
+            debug_log!(&config, "MemoryInstance::new: memory access test completed");
+        }
+        
         Self { ty, data }
     }
 
@@ -125,6 +189,24 @@ impl MemoryInstance {
                 offset, len, self.data.len()
             ));
         }
+        
+        // Test memory access before returning the slice
+        if len > 0 {
+            // Test the first byte
+            let _ = self.data[offset];
+            
+            // Test the last byte if different from first
+            if end > offset + 1 {
+                let _ = self.data[end - 1];
+            }
+            
+            // Test a few bytes in the middle if the range is large enough
+            if end > offset + 100 {
+                let mid = offset + (end - offset) / 2;
+                let _ = self.data[mid];
+            }
+        }
+        
         Ok(&self.data[offset..end])
     }
 
@@ -199,14 +281,89 @@ impl MemoryInstance {
             return Err("Memory size exceeds WebAssembly limit of 2^16 pages".to_string());
         }
 
+        // Add a reasonable limit to prevent excessive memory usage in kernel space
+        const MAX_KERNEL_MEMORY_PAGES: u32 = 4; // 4 pages = ~256KB (adjusted for prime.wasm)
+        const MAX_KERNEL_MEMORY_BYTES: usize = MAX_KERNEL_MEMORY_PAGES as usize * WASM_PAGE_SIZE as usize;
+        
+        if new_pages > MAX_KERNEL_MEMORY_PAGES {
+            return Err(format!("Memory size exceeds kernel limit of {} pages", MAX_KERNEL_MEMORY_PAGES));
+        }
+
         let new_bytes = delta * WASM_PAGE_SIZE as u32;
         let new_data_size = self.data.len() + new_bytes as usize;
 
-        crate::wasm::runtime::debug_log(config, &format!("MemoryInstance::grow: extending data by {} bytes (from {} to {})", new_bytes, self.data.len(), new_data_size));
+        debug_log!(config, "MemoryInstance::grow: extending data by {} bytes (from {} to {})", new_bytes, self.data.len(), new_data_size);
         
-        self.data.resize(new_data_size, 0);
+        // Try to grow memory in much smaller chunks to avoid page faults
+        let chunk_size = 256; // Reduced to 256 bytes for maximum safety
+        let mut remaining_bytes = new_bytes as usize;
+        let mut current_size = self.data.len();
         
-        crate::wasm::runtime::debug_log(config, &format!("MemoryInstance::grow: data extended successfully, new size: {}", self.data.len()));
+        debug_log!(config, "MemoryInstance::grow: starting growth by {} bytes in {} chunks", new_bytes, (new_bytes as usize + chunk_size - 1) / chunk_size);
+        
+        while remaining_bytes > 0 {
+            let current_chunk = core::cmp::min(chunk_size, remaining_bytes);
+            
+            // Try to extend the vector by the current chunk size
+            let old_len = self.data.len();
+            self.data.resize(old_len + current_chunk, 0);
+            
+            // Check if the resize was successful
+            if self.data.len() == old_len + current_chunk {
+                // Explicitly zero out the newly allocated chunk and test access
+                for i in old_len..self.data.len() {
+                    self.data[i] = 0;
+                }
+                
+                // Test that we can actually read from the newly allocated memory
+                if self.data.len() > old_len {
+                    let test_offset = old_len;
+                    let test_value = self.data[test_offset];
+                    if test_value != 0 {
+                        debug_log!(config, "MemoryInstance::grow: warning: newly allocated byte at {} is not zero: 0x{:02x}", test_offset, test_value);
+                    }
+                }
+                
+                remaining_bytes -= current_chunk;
+                debug_log!(config, "MemoryInstance::grow: extended by {} bytes, remaining: {}", current_chunk, remaining_bytes);
+                debug_log!(config, "MemoryInstance::grow: chunk allocated successfully, remaining: {} bytes", remaining_bytes);
+            } else {
+                debug_log!(config, "MemoryInstance::grow: failed to allocate chunk of {} bytes", current_chunk);
+                return Err(format!("Failed to allocate memory: could not extend by {} bytes", current_chunk));
+            }
+        }
+        
+        debug_log!(config, "MemoryInstance::grow: data extended successfully, new size: {}", self.data.len());
+        debug_log!(config, "MemoryInstance::grow: memory growth completed successfully, new size: {} bytes", self.data.len());
+        
+        // Verify that the newly allocated memory is accessible by testing multiple points
+        if self.data.len() > 0 {
+            debug_log!(config, "MemoryInstance::grow: testing newly allocated memory access...");
+            
+            // Test the beginning of the newly allocated memory
+            let new_start = current_size;
+            if new_start < self.data.len() {
+                let test_value = self.data[new_start];
+                debug_log!(config, "MemoryInstance::grow: new memory start at {}: 0x{:02x}", new_start, test_value);
+            }
+            
+            // Test the middle of the newly allocated memory
+            let new_middle = new_start + (self.data.len() - new_start) / 2;
+            if new_middle < self.data.len() {
+                let test_value = self.data[new_middle];
+                debug_log!(config, "MemoryInstance::grow: new memory middle at {}: 0x{:02x}", new_middle, test_value);
+            }
+            
+            // Test the end of the newly allocated memory
+            let new_end = self.data.len() - 1;
+            if new_end >= new_start {
+                let test_value = self.data[new_end];
+                debug_log!(config, "MemoryInstance::grow: new memory end at {}: 0x{:02x}", new_end, test_value);
+            }
+            
+            debug_log!(config, "MemoryInstance::grow: memory access test completed");
+        }
+        
         Ok(())
     }
 
@@ -231,13 +388,95 @@ impl MemoryInstance {
             return Err(format!("Memory fill range {}..{} out of bounds (size: {})", offset, end, self.data.len()));
         }
 
-        crate::wasm::runtime::debug_log(config, &format!("MemoryInstance::fill: filling range {}..{} with value 0x{:02x}", offset, end, value));
+        debug_log!(config, "MemoryInstance::fill: filling range {}..{} with value 0x{:02x}", offset, end, value);
         
-        for i in offset..end {
-            self.data[i] = value;
+        // Test memory access before filling to ensure the memory is properly mapped
+        if count > 0 {
+            // Test the first byte
+            match self.read_byte(offset) {
+                Ok(_) => debug_log!(config, "MemoryInstance::fill: first byte access test successful"),
+                Err(e) => {
+                    debug_log!(config, "MemoryInstance::fill: first byte access test failed: {}", e);
+                    return Err(format!("Memory access test failed at offset {}: {}", offset, e));
+                }
+            }
+            
+            // Test the last byte if different from first
+            if end > offset + 1 {
+                match self.read_byte(end - 1) {
+                    Ok(_) => debug_log!(config, "MemoryInstance::fill: last byte access test successful"),
+                    Err(e) => {
+                        debug_log!(config, "MemoryInstance::fill: last byte access test failed: {}", e);
+                        return Err(format!("Memory access test failed at offset {}: {}", end - 1, e));
+                    }
+                }
+            }
+            
+            // Test a few bytes in the middle if the range is large enough
+            if end > offset + 100 {
+                let mid = offset + (end - offset) / 2;
+                match self.read_byte(mid) {
+                    Ok(_) => debug_log!(config, "MemoryInstance::fill: middle byte access test successful"),
+                    Err(e) => {
+                        debug_log!(config, "MemoryInstance::fill: middle byte access test failed: {}", e);
+                        return Err(format!("Memory access test failed at offset {}: {}", mid, e));
+                    }
+                }
+            }
         }
         
-        crate::wasm::runtime::debug_log(config, &format!("MemoryInstance::fill: fill completed successfully"));
+        // Fill memory in very small chunks to avoid potential issues
+        let chunk_size = 64; // Further reduced to 64 bytes for maximum safety
+        let mut current_offset = offset;
+        
+        while current_offset < end {
+            let current_chunk_end = core::cmp::min(current_offset + chunk_size, end);
+            
+            // Test access to the current chunk before filling
+            if current_chunk_end > current_offset {
+                match self.read_byte(current_offset) {
+                    Ok(_) => debug_log!(config, "MemoryInstance::fill: chunk access test successful at offset {}", current_offset),
+                    Err(e) => {
+                        debug_log!(config, "MemoryInstance::fill: chunk access test failed at offset {}: {}", current_offset, e);
+                        return Err(format!("Memory access test failed at offset {}: {}", current_offset, e));
+                    }
+                }
+                
+                // Also test the end of the chunk
+                if current_chunk_end > current_offset + 1 {
+                    match self.read_byte(current_chunk_end - 1) {
+                        Ok(_) => debug_log!(config, "MemoryInstance::fill: chunk end access test successful at offset {}", current_chunk_end - 1),
+                        Err(e) => {
+                            debug_log!(config, "MemoryInstance::fill: chunk end access test failed at offset {}: {}", current_chunk_end - 1, e);
+                            return Err(format!("Memory access test failed at offset {}: {}", current_chunk_end - 1, e));
+                        }
+                    }
+                }
+            }
+            
+            // Fill the current chunk with extra bounds checking
+            for i in current_offset..current_chunk_end {
+                // Double-check bounds before each write
+                if i >= self.data.len() {
+                    return Err(format!("Memory fill: index {} out of bounds (size: {})", i, self.data.len()));
+                }
+                
+                // Test read access before write
+                let _ = self.data[i];
+                
+                // Perform the write
+                self.data[i] = value;
+                
+                // Verify the write was successful
+                if self.data[i] != value {
+                    return Err(format!("Memory fill: write verification failed at offset {}: expected 0x{:02x}, got 0x{:02x}", i, value, self.data[i]));
+                }
+            }
+            
+            current_offset = current_chunk_end;
+        }
+        
+        debug_log!(config, "MemoryInstance::fill: fill completed successfully");
         Ok(())
     }
 
@@ -283,18 +522,67 @@ impl MemoryInstance {
         Ok(())
     }
 
-    /// Initializes a range of memory with bytes
+    /// Initializes a range of memory with data from a data segment
     /// 
     /// # Arguments
     /// 
-    /// * `offset` - The starting byte offset
-    /// * `bytes` - The bytes to write
+    /// * `offset` - The starting byte offset in memory
+    /// * `bytes` - The bytes to initialize with
     /// 
     /// # Returns
     /// 
     /// An error if the range is out of bounds.
     pub fn init(&mut self, offset: usize, bytes: &[u8]) -> Result<(), String> {
-        self.write_bytes(offset, bytes)
+        let end = offset.checked_add(bytes.len()).ok_or_else(|| {
+            "Memory init range overflow".to_string()
+        })?;
+
+        if end > self.data.len() {
+            return Err(format!("Memory init range {}..{} out of bounds (size: {})", offset, end, self.data.len()));
+        }
+
+        // Initialize memory in smaller chunks to avoid potential issues
+        let chunk_size = 64; // Use small chunks for safety
+        let mut current_offset = offset;
+        let mut bytes_index = 0;
+        
+        while bytes_index < bytes.len() {
+            let current_chunk_end = core::cmp::min(current_offset + chunk_size, end);
+            let current_chunk_size = current_chunk_end - current_offset;
+            
+            // Test memory access before writing
+            if current_chunk_end > current_offset {
+                // Test read access to ensure memory is properly mapped
+                let _ = self.data[current_offset];
+            }
+            
+            // Copy the current chunk
+            for i in 0..current_chunk_size {
+                let mem_index = current_offset + i;
+                let bytes_index = bytes_index + i;
+                
+                // Double-check bounds before each write
+                if mem_index >= self.data.len() || bytes_index >= bytes.len() {
+                    return Err(format!("Memory init: index out of bounds (mem: {}, bytes: {})", mem_index, bytes_index));
+                }
+                
+                // Test read access before write
+                let _ = self.data[mem_index];
+                
+                // Perform the write
+                self.data[mem_index] = bytes[bytes_index];
+                
+                // Verify the write was successful
+                if self.data[mem_index] != bytes[bytes_index] {
+                    return Err(format!("Memory init: write verification failed at offset {}: expected 0x{:02x}, got 0x{:02x}", mem_index, bytes[bytes_index], self.data[mem_index]));
+                }
+            }
+            
+            current_offset = current_chunk_end;
+            bytes_index += current_chunk_size;
+        }
+        
+        Ok(())
     }
 }
 

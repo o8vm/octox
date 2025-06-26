@@ -409,7 +409,10 @@ impl<'a> Parser<'a> {
         let section_end = self.cursor + size as usize;
         let count = self.parse_u32()?;
         let mut datas = Vec::with_capacity(count as usize);
-        for _ in 0..count {
+        
+        crate::parser_debug_log!(self.config, "Parsing data section: {} segments", count);
+        
+        for i in 0..count {
             let flag = self.read_byte()?;
             match flag {
                 0 => {
@@ -417,12 +420,18 @@ impl<'a> Parser<'a> {
                     let offset = self.parse_const_expr()?;
                     let byte_count = self.parse_u32()?;
                     let data = self.read_bytes(byte_count as usize)?.to_vec();
+                    
+                    crate::parser_debug_log!(self.config, "Data segment {}: active, offset={:?}, size={} bytes", i, offset, byte_count);
+                    
                     datas.push(ast::DataSegment::active(data, 0, offset));
                 }
                 1 => {
                     // passive, bytes
                     let byte_count = self.parse_u32()?;
                     let data = self.read_bytes(byte_count as usize)?.to_vec();
+                    
+                    crate::parser_debug_log!(self.config, "Data segment {}: passive, size={} bytes", i, byte_count);
+                    
                     datas.push(ast::DataSegment::passive(data));
                 }
                 2 => {
@@ -431,6 +440,9 @@ impl<'a> Parser<'a> {
                     let offset = self.parse_const_expr()?;
                     let byte_count = self.parse_u32()?;
                     let data = self.read_bytes(byte_count as usize)?.to_vec();
+                    
+                    crate::parser_debug_log!(self.config, "Data segment {}: active, memory={}, offset={:?}, size={} bytes", i, memidx, offset, byte_count);
+                    
                     datas.push(ast::DataSegment::active(data, memidx, offset));
                 }
                 _ => return Err(ParseError::InvalidDataSegment),

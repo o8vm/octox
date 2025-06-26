@@ -2858,11 +2858,10 @@ pub enum ParametricInstruction {
     /// Drop the top operand from the stack
     Drop,
     /// Select one of two operands based on a condition
-    Select {
-        /// Optional type annotation for the operands
-        /// If None, operands must be of numeric or vector type
-        operand_types: Option<Vec<ValType>>,
-    },
+    /// 
+    /// The optional value type determines the type of the operands.
+    /// If missing, the operands must be of numeric or vector type.
+    Select(Option<ValType>),
 }
 
 impl ParametricInstruction {
@@ -2872,7 +2871,7 @@ impl ParametricInstruction {
             // Drop consumes one operand
             ParametricInstruction::Drop => 1,
             // Select consumes three operands (two values and a condition)
-            ParametricInstruction::Select { .. } => 3,
+            ParametricInstruction::Select(_) => 3,
         }
     }
 
@@ -2882,20 +2881,33 @@ impl ParametricInstruction {
             // Drop produces no results
             ParametricInstruction::Drop => 0,
             // Select produces one result (the selected value)
-            ParametricInstruction::Select { .. } => 1,
+            ParametricInstruction::Select(_) => 1,
         }
     }
 
     /// Returns the type of the result produced by this instruction
     /// 
     /// For Select, returns the type of the selected value.
-    /// If operand_types is Some, returns the first type in the vector.
-    /// If operand_types is None, the type is determined at runtime.
+    /// If operand_type is Some, returns that type.
+    /// If operand_type is None, the type is determined at runtime.
     pub fn result_type(&self) -> Option<ValType> {
         match self {
             ParametricInstruction::Drop => None,
-            ParametricInstruction::Select { operand_types } => {
-                operand_types.as_ref().and_then(|types| types.first().copied())
+            ParametricInstruction::Select(operand_type) => *operand_type,
+        }
+    }
+}
+
+impl fmt::Display for ParametricInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Drop => write!(f, "drop"),
+            Self::Select(operand_type) => {
+                write!(f, "select")?;
+                if let Some(ty) = operand_type {
+                    write!(f, " {}", ty)?;
+                }
+                Ok(())
             }
         }
     }
@@ -3082,94 +3094,6 @@ pub enum ControlInstruction {
         /// The type index of the expected function type
         type_index: u32,
     },
-    /// Create a null reference of the given reference type
-    /// 
-    /// # Specification
-    /// 
-    /// The `ref.null` instruction creates a null reference of the given reference type.
-    /// The type must be a reference type (funcref or externref).
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// // Create a null function reference
-    /// ref.null funcref
-    /// 
-    /// // Create a null external reference
-    /// ref.null externref
-    /// ```
-    RefNull(ValType),
-
-    /// Check if a reference is null
-    /// 
-    /// # Specification
-    /// 
-    /// The `ref.is_null` instruction checks if a reference is null.
-    /// It pops a reference from the stack and pushes an i32 value:
-    /// 1 if the reference is null, 0 otherwise.
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// // Check if a function reference is null
-    /// ref.is_null
-    /// ```
-    RefIsNull,
-
-    /// Create a reference to a function
-    /// 
-    /// # Specification
-    /// 
-    /// The `ref.func` instruction creates a reference to a function.
-    /// The function index must be valid.
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// // Create a reference to function 0
-    /// ref.func 0
-    /// ```
-    RefFunc(u32),
-
-    /// Drop the top operand from the stack
-    /// 
-    /// # Specification
-    /// 
-    /// The `drop` instruction pops a value from the stack and discards it.
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// // Drop the top value from the stack
-    /// drop
-    /// ```
-    Drop,
-
-    /// Select one of two operands based on a condition
-    /// 
-    /// # Specification
-    /// 
-    /// The `select` instruction pops three values from the stack:
-    /// a condition (i32), a value if the condition is non-zero,
-    /// and a value if the condition is zero.
-    /// 
-    /// If the condition is non-zero, the first value is pushed back;
-    /// otherwise, the second value is pushed back.
-    /// 
-    /// The optional type annotation specifies the types of the operands.
-    /// If no type annotation is provided, the operands must be of numeric type.
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// // Select between two i32 values
-    /// select
-    /// 
-    /// // Select between two values of the same type
-    /// select (i32 i64)
-    /// ```
-    Select(Option<ResultType>),
-
     /// End of a block, loop, or if instruction
     /// 
     /// # Specification
@@ -3227,14 +3151,8 @@ impl ControlInstruction {
             Br { .. } => 0,
             // No operands (block type is immediate)
             Block { .. } | Loop { .. } | If { .. } => 0,
-            // No operands (ref.null and ref.is_null)
-            RefNull(_) => 0,
-            Self::RefIsNull => 1,
-            Self::RefFunc(_) => 0,
-            Self::Drop => 1,
-            Self::Select(_) => 3, // condition + two values
-            Self::End => 0,
-            Self::Else => 0,
+            // No operands
+            End | Else => 0,
         }
     }
 
@@ -3254,14 +3172,8 @@ impl ControlInstruction {
             }
             // Results are determined by the function type
             Call { .. } | CallIndirect { .. } => 0, // TODO: Look up function type
-            // Results are determined by the reference type
-            RefNull(_) => 1,
-            Self::RefIsNull => 1,
-            Self::RefFunc(_) => 1,
-            Self::Drop => 0,
-            Self::Select(_) => 1,
-            Self::End => 0,
-            Self::Else => 0,
+            // No results
+            End | Else => 0,
         }
     }
 
@@ -3281,16 +3193,8 @@ impl ControlInstruction {
             }
             // Results are determined by the function type
             Call { .. } | CallIndirect { .. } => None, // TODO: Look up function type
-            // Results are determined by the reference type
-            RefNull(ty) => Some(*ty),
-            Self::RefIsNull => Some(ValType::I32),
-            Self::RefFunc(_) => Some(ValType::FuncRef),
-            Self::Drop => None,
-            Self::Select(Some(types)) if types.len() == 1 => Some(types[0]),
-            Self::Select(None) => Some(ValType::I32), // Default to i32 for untyped select
-            Self::End => None,
-            Self::Else => None,
-            _ => None, // Invalid type annotation
+            // No results
+            End | Else => None,
         }
     }
 }
@@ -3310,6 +3214,8 @@ pub enum Instruction {
     Table(TableInstruction),
     /// Variable instruction
     Variable(VariableInstruction),
+    /// Reference instruction
+    Reference(ReferenceInstruction),
     /// Control instruction
     Control(ControlInstruction),
     /// Administrative instruction
@@ -3326,6 +3232,7 @@ impl Instruction {
             Self::Memory(instr) => instr.operand_count(),
             Self::Table(instr) => instr.operand_count(),
             Self::Variable(instr) => instr.operand_count(),
+            Self::Reference(instr) => instr.operand_count(),
             Self::Control(instr) => instr.operand_count(),
             Self::Administrative(instr) => match instr {
                 AdministrativeInstruction::Trap => 0,
@@ -3348,6 +3255,7 @@ impl Instruction {
             Self::Memory(instr) => instr.result_count(),
             Self::Table(instr) => instr.result_count(),
             Self::Variable(instr) => instr.result_count(),
+            Self::Reference(instr) => instr.result_count(),
             Self::Control(instr) => instr.result_count(),
             Self::Administrative(instr) => match instr {
                 AdministrativeInstruction::Trap => 0,
@@ -3370,6 +3278,7 @@ impl Instruction {
             Self::Memory(instr) => instr.result_type(),
             Self::Table(instr) => instr.result_type(),
             Self::Variable(instr) => instr.result_type(),
+            Self::Reference(instr) => instr.result_type(),
             Self::Control(instr) => instr.result_type(),
             Self::Administrative(instr) => match instr {
                 AdministrativeInstruction::Trap => None,
@@ -3389,10 +3298,11 @@ impl fmt::Display for Instruction {
         match self {
             Self::Numeric(instr) => write!(f, "{:?}", instr),
             Self::Vector(instr) => write!(f, "{:?}", instr),
-            Self::Parametric(instr) => write!(f, "{:?}", instr),
+            Self::Parametric(instr) => write!(f, "{}", instr),
             Self::Memory(instr) => write!(f, "{:?}", instr),
-            Self::Table(instr) => write!(f, "{:?}", instr),
-            Self::Variable(instr) => write!(f, "{:?}", instr),
+            Self::Table(instr) => write!(f, "{}", instr),
+            Self::Variable(instr) => write!(f, "{}", instr),
+            Self::Reference(instr) => write!(f, "{}", instr),
             Self::Control(instr) => write!(f, "{:?}", instr),
             Self::Administrative(instr) => write!(f, "{:?}", instr),
         }
@@ -3435,9 +3345,9 @@ impl Expression {
                 ValType::F64 => Instruction::Numeric(NumericInstruction::F64Const(0.0)),
                 _ => panic!("Unsupported constant type"),
             },
-            ConstExpr::GlobalGet(_) => Instruction::Control(ControlInstruction::Call { function_index: 0 }),
-            ConstExpr::RefFunc(_) => Instruction::Control(ControlInstruction::Call { function_index: 0 }),
-            ConstExpr::RefNull(_) => Instruction::Control(ControlInstruction::Call { function_index: 0 }),
+            ConstExpr::GlobalGet(idx) => Instruction::Variable(VariableInstruction::GlobalGet(*idx)),
+            ConstExpr::RefFunc(idx) => Instruction::Reference(ReferenceInstruction::RefFunc(*idx)),
+            ConstExpr::RefNull(ty) => Instruction::Reference(ReferenceInstruction::RefNull(*ty)),
         };
         Self::Constant { expr, instruction }
     }
@@ -3596,6 +3506,21 @@ impl TableInstruction {
     }
 }
 
+impl fmt::Display for TableInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Get(idx) => write!(f, "table.get {}", idx),
+            Self::Set(idx) => write!(f, "table.set {}", idx),
+            Self::Size(idx) => write!(f, "table.size {}", idx),
+            Self::Grow(idx) => write!(f, "table.grow {}", idx),
+            Self::Fill(idx) => write!(f, "table.fill {}", idx),
+            Self::Copy { dst_table, src_table } => write!(f, "table.copy {} {}", dst_table, src_table),
+            Self::Init { table_index, elem_index } => write!(f, "table.init {} {}", table_index, elem_index),
+            Self::ElemDrop(idx) => write!(f, "elem.drop {}", idx),
+        }
+    }
+}
+
 /// Variable instructions for accessing local and global variables
 #[derive(Debug, Clone, PartialEq)]
 pub enum VariableInstruction {
@@ -3707,6 +3632,18 @@ impl VariableInstruction {
     }
 }
 
+impl fmt::Display for VariableInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LocalGet(idx) => write!(f, "local.get {}", idx),
+            Self::LocalSet(idx) => write!(f, "local.set {}", idx),
+            Self::LocalTee(idx) => write!(f, "local.tee {}", idx),
+            Self::GlobalGet(idx) => write!(f, "global.get {}", idx),
+            Self::GlobalSet(idx) => write!(f, "global.set {}", idx),
+        }
+    }
+}
+
 /// Administrative instruction
 /// 
 /// Administrative instructions are used to express the reduction of traps,
@@ -3769,6 +3706,100 @@ impl fmt::Display for AdministrativeInstruction {
                 write!(f, " }}")
             }
             Self::Value(value) => write!(f, "{}", value),
+        }
+    }
+}
+
+/// Reference instruction
+/// 
+/// Reference instructions are used to create and manipulate references.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReferenceInstruction {
+    /// Create a null reference of the given reference type
+    /// 
+    /// # Specification
+    /// 
+    /// The `ref.null` instruction creates a null reference of the given reference type.
+    /// The type must be a reference type (funcref or externref).
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// // Create a null function reference
+    /// ref.null funcref
+    /// 
+    /// // Create a null external reference
+    /// ref.null externref
+    /// ```
+    RefNull(ValType),
+
+    /// Check if a reference is null
+    /// 
+    /// # Specification
+    /// 
+    /// The `ref.is_null` instruction checks if a reference is null.
+    /// It pops a reference from the stack and pushes an i32 value:
+    /// 1 if the reference is null, 0 otherwise.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// // Check if a function reference is null
+    /// ref.is_null
+    /// ```
+    RefIsNull,
+
+    /// Create a reference to a function
+    /// 
+    /// # Specification
+    /// 
+    /// The `ref.func` instruction creates a reference to a function.
+    /// The function index must be valid.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// // Create a reference to function 0
+    /// ref.func 0
+    /// ```
+    RefFunc(u32),
+}
+
+impl ReferenceInstruction {
+    /// Returns the number of operands consumed by this instruction
+    pub fn operand_count(&self) -> usize {
+        match self {
+            Self::RefNull(_) => 0,
+            Self::RefIsNull => 1,
+            Self::RefFunc(_) => 0,
+        }
+    }
+
+    /// Returns the number of results produced by this instruction
+    pub fn result_count(&self) -> usize {
+        match self {
+            Self::RefNull(_) => 1,
+            Self::RefIsNull => 1,
+            Self::RefFunc(_) => 1,
+        }
+    }
+
+    /// Returns the type of the result produced by this instruction
+    pub fn result_type(&self) -> Option<ValType> {
+        match self {
+            Self::RefNull(ty) => Some(*ty),
+            Self::RefIsNull => Some(ValType::I32),
+            Self::RefFunc(_) => Some(ValType::FuncRef),
+        }
+    }
+}
+
+impl fmt::Display for ReferenceInstruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RefNull(ty) => write!(f, "ref.null {}", ty),
+            Self::RefIsNull => write!(f, "ref.is_null"),
+            Self::RefFunc(idx) => write!(f, "ref.func {}", idx),
         }
     }
 }

@@ -62,7 +62,10 @@ impl<'a> Parser<'a> {
                 let global_index = self.parse_u32()?;
                 Ok(ast::VariableInstruction::GlobalSet(global_index))
             }
-            _ => Err(ParseError::InvalidInstruction),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode,
+                position: self.cursor - 1,
+            }),
         }
     }
 
@@ -145,10 +148,16 @@ impl<'a> Parser<'a> {
                         let table_index = self.parse_u32()?;
                         Ok(ast::TableInstruction::Fill(table_index))
                     }
-                    _ => Err(ParseError::InvalidInstruction),
+                    _ => Err(ParseError::InvalidInstructionWithDetails {
+                        opcode:opcode as u8,
+                        position: self.cursor - 1,
+                    }),
                 }
             }
-            _ => Err(ParseError::InvalidInstruction),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode: opcode as u8,
+                position: self.cursor - 1,
+            }),
         }
     }
 
@@ -339,14 +348,20 @@ impl<'a> Parser<'a> {
             0x3F => {
                 let zero = self.parse_byte()?;
                 if zero != 0x00 {
-                    return Err(ParseError::InvalidInstruction);
+                    return Err(ParseError::InvalidInstructionWithDetails {
+                        opcode: zero,
+                        position: self.cursor - 1,
+                    });
                 }
                 Ok(ast::MemoryInstruction::MemorySize)
             }
             0x40 => {
                 let zero = self.parse_byte()?;
                 if zero != 0x00 {
-                    return Err(ParseError::InvalidInstruction);
+                    return Err(ParseError::InvalidInstructionWithDetails {
+                        opcode: zero,
+                        position: self.cursor - 1,
+                    });
                 }
                 Ok(ast::MemoryInstruction::MemoryGrow)
             }
@@ -675,7 +690,10 @@ impl<'a> Parser<'a> {
             0xC2 => Ok(ast::NumericInstruction::I64ConversionOp(ast::ConversionOp::Extend8S)),
             0xC3 => Ok(ast::NumericInstruction::I64ConversionOp(ast::ConversionOp::Extend16S)),
             0xC4 => Ok(ast::NumericInstruction::I64ConversionOp(ast::ConversionOp::Extend32S)),
-            _ => Err(ParseError::InvalidInstruction),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode,
+                position: self.cursor - 1,
+            }),
         }
     }
 
@@ -710,7 +728,10 @@ impl<'a> Parser<'a> {
         // Read the prefix (must be 0xFD)
         let prefix = self.read_byte()?;
         if prefix != 0xFD {
-            return Err(ParseError::InvalidInstruction);
+            return Err(ParseError::InvalidInstructionWithDetails {
+                opcode: prefix,
+                position: self.cursor - 1,
+            });
         }
 
         // Read the opcode
@@ -881,7 +902,10 @@ impl<'a> Parser<'a> {
                 Ok(ast::VectorInstruction::ReplaceLane { shape: ast::VectorShape::Float(ast::FloatVectorShape::F64X2), lane })
             }
             // Other vector instructions will be added here
-            _ => Err(ParseError::InvalidInstruction),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode: opcode as u8,
+                position: self.cursor - 1,
+            }),
         }
     }
 
@@ -894,14 +918,20 @@ impl<'a> Parser<'a> {
     /// Vec<ast::Instruction> (end命令自体は含まない)
     pub fn parse_expr(&mut self) -> ParseResult<Vec<ast::Instruction>> {
         let mut expr = Vec::new();
+        parser_debug_log!(&self.config, "parse_expr: starting at cursor {}", self.cursor);
         loop {
             let pos = self.cursor;
             let byte = self.read_byte()?;
+            parser_debug_log!(&self.config, "parse_expr: read byte 0x{:02X} at cursor {}", byte, pos);
             if byte == 0x0B {
+                parser_debug_log!(&self.config, "parse_expr: found end marker, returning {} instructions", expr.len());
                 break;
             } else {
                 self.cursor = pos;
-                expr.push(self.parse_instruction()?);
+                parser_debug_log!(&self.config, "parse_expr: parsing instruction at cursor {}", self.cursor);
+                let instruction = self.parse_instruction()?;
+                parser_debug_log!(&self.config, "parse_expr: parsed instruction: {:?}", instruction);
+                expr.push(instruction);
             }
         }
         Ok(expr)
@@ -929,10 +959,30 @@ impl<'a> Parser<'a> {
     /// - `InvalidInstruction`: Invalid opcode
     pub fn parse_instruction(&mut self) -> ParseResult<ast::Instruction> {
         let byte = self.read_byte()?;
+        parser_debug_log!(&self.config, "parse_instruction: opcode 0x{:02X} at cursor {}", byte, self.cursor - 1);
 
         match byte {
+            // Parametric instructions
+            0x1A => {
+                // drop
+                parser_debug_log!(&self.config, "parse_instruction: parametric instruction drop");
+                Ok(ast::Instruction::Parametric(ast::ParametricInstruction::Drop))
+            }
+            0x1B => {
+                // select
+                parser_debug_log!(&self.config, "parse_instruction: parametric instruction select");
+                Ok(ast::Instruction::Parametric(ast::ParametricInstruction::Select(None)))
+            }
+            0x1C => {
+                // select 𝑡 (typed select)
+                parser_debug_log!(&self.config, "parse_instruction: parametric instruction typed select");
+                let operand_type = self.parse_val_type()?;
+                Ok(ast::Instruction::Parametric(ast::ParametricInstruction::Select(Some(operand_type))))
+            }
+
             // Control instructions
-            0x00..=0x11 => {
+            0x00..=0x19 => {
+                parser_debug_log!(&self.config, "parse_instruction: control instruction 0x{:02X}", byte);
                 // Put the opcode back so parse_control_instruction can read it
                 self.cursor -= 1;
                 let instr = self.parse_control_instruction()?;
@@ -941,6 +991,7 @@ impl<'a> Parser<'a> {
 
             // Variable instructions
             0x20..=0x24 => {
+                parser_debug_log!(&self.config, "parse_instruction: variable instruction 0x{:02X}", byte);
                 // Put the opcode back so parse_variable_instruction can read it
                 self.cursor -= 1;
                 let instr = self.parse_variable_instruction()?;
@@ -949,6 +1000,7 @@ impl<'a> Parser<'a> {
 
             // Table instructions
             0x25..=0x26 | 0xFC => {
+                parser_debug_log!(&self.config, "parse_instruction: table instruction 0x{:02X}", byte);
                 // 0xFC prefix: check for numeric saturating truncation instructions
                 let pos = self.cursor;
                 let opcode = if byte == 0xFC { self.parse_u32()? } else { 0 };
@@ -974,7 +1026,10 @@ impl<'a> Parser<'a> {
                         let data_index = self.parse_u32()?;
                         let zero = self.parse_byte()?;
                         if zero != 0x00 {
-                            return Err(ParseError::InvalidInstruction);
+                            return Err(ParseError::InvalidInstructionWithDetails {
+                                opcode: zero,
+                                position: self.cursor - 1,
+                            });
                         }
                         Ok(ast::Instruction::Memory(ast::MemoryInstruction::MemoryInit { data_index }))
                     }
@@ -988,7 +1043,10 @@ impl<'a> Parser<'a> {
                         let zero1 = self.parse_byte()?;
                         let zero2 = self.parse_byte()?;
                         if zero1 != 0x00 || zero2 != 0x00 {
-                            return Err(ParseError::InvalidInstruction);
+                            return Err(ParseError::InvalidInstructionWithDetails {
+                                opcode: if zero1 != 0x00 { zero1 } else { zero2 },
+                                position: self.cursor - 1,
+                            });
                         }
                         Ok(ast::Instruction::Memory(ast::MemoryInstruction::MemoryCopy))
                     }
@@ -1015,6 +1073,7 @@ impl<'a> Parser<'a> {
 
             // Memory instructions
             0x28..=0x3E | 0x3F..=0x40 => {
+                parser_debug_log!(&self.config, "parse_instruction: memory instruction 0x{:02X}", byte);
                 // Put the opcode back so parse_memory_instruction can read it
                 self.cursor -= 1;
                 let instr = self.parse_memory_instruction()?;
@@ -1023,6 +1082,7 @@ impl<'a> Parser<'a> {
 
             // Numeric instructions
             0x41..=0xC4 => {
+                parser_debug_log!(&self.config, "parse_instruction: numeric instruction 0x{:02X}", byte);
                 // Put the opcode back so parse_numeric_instruction can read it
                 self.cursor -= 1;
                 let instr = self.parse_numeric_instruction()?;
@@ -1031,14 +1091,30 @@ impl<'a> Parser<'a> {
 
             // Vector instructions (0xFD prefix)
             0xFD => {
+                parser_debug_log!(&self.config, "parse_instruction: vector instruction 0x{:02X}", byte);
                 // Reset cursor to read the prefix again
                 self.cursor -= 1;
                 let instruction = self.parse_vector_instruction()?;
                 Ok(ast::Instruction::Vector(instruction))
             }
 
+            // Reference instructions
+            0xD0..=0xD2 => {
+                parser_debug_log!(&self.config, "parse_instruction: reference instruction 0x{:02X}", byte);
+                // Put the opcode back so parse_reference_instruction can read it
+                self.cursor -= 1;
+                let instr = self.parse_reference_instruction()?;
+                Ok(ast::Instruction::Reference(instr))
+            }
+
             // ... rest of the match arms ...
-            _ => Err(ParseError::InvalidInstruction),
+            _ => {
+                parser_debug_log!(&self.config, "parse_instruction: INVALID opcode 0x{:02X} at cursor {}", byte, self.cursor - 1);
+                Err(ParseError::InvalidInstructionWithDetails {
+                    opcode: byte,
+                    position: self.cursor - 1,
+                })
+            }
         }
     }
 
@@ -1059,8 +1135,8 @@ impl<'a> Parser<'a> {
             Instruction::Numeric(NumericInstruction::F32Const(val)) => Ok(ConstExpr::Const(ValType::F32, val.to_le_bytes().to_vec())),
             Instruction::Numeric(NumericInstruction::F64Const(val)) => Ok(ConstExpr::Const(ValType::F64, val.to_le_bytes().to_vec())),
             Instruction::Variable(ast::VariableInstruction::GlobalGet(idx)) => Ok(ConstExpr::GlobalGet(idx)),
-            Instruction::Control(ast::ControlInstruction::RefNull(ty)) => Ok(ConstExpr::RefNull(ty)),
-            Instruction::Control(ast::ControlInstruction::RefFunc(idx)) => Ok(ConstExpr::RefFunc(idx)),
+            Instruction::Reference(ast::ReferenceInstruction::RefNull(ty)) => Ok(ConstExpr::RefNull(ty)),
+            Instruction::Reference(ast::ReferenceInstruction::RefFunc(idx)) => Ok(ConstExpr::RefFunc(idx)),
             _ => Err(crate::wasm::parser::error::ParseError::InvalidConstExpr),
         }
     }
@@ -1084,6 +1160,7 @@ impl<'a> Parser<'a> {
     ///        | 0x0F ⇒ return
     ///        | 0x10 𝑥:funcidx ⇒ call 𝑥
     ///        | 0x11 𝑥:typeidx 𝑦:tableidx ⇒ call_indirect 𝑥 𝑦
+    ///        | 0x1A ⇒ drop
     /// ```
     /// 
     /// # Examples
@@ -1227,7 +1304,10 @@ impl<'a> Parser<'a> {
                     type_index,
                 })
             }
-            _ => Err(ParseError::InvalidInstruction),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode,
+                position: self.cursor - 1,
+            }),
         }
     }
 
@@ -1326,5 +1406,142 @@ impl<'a> Parser<'a> {
             items.push(f(self)?);
         }
         Ok(items)
+    }
+
+    /// Parse a reference instruction
+    /// 
+    /// # Specification
+    /// 
+    /// Reference instructions are represented by byte codes followed by any immediate operands:
+    /// 
+    /// ```
+    /// instr ::= ...
+    ///        | 0xD0 rt:reftype ⇒ ref.null rt
+    ///        | 0xD1 ⇒ ref.is_null
+    ///        | 0xD2 𝑥:funcidx ⇒ ref.func 𝑥
+    /// ```
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// // ref.null funcref
+    /// 0xD0 0x70
+    /// 
+    /// // ref.func 0
+    /// 0xD2 0x00
+    /// ```
+    /// 
+    /// # Errors
+    /// 
+    /// - `UnexpectedEof`: Input ends unexpectedly
+    /// - `InvalidInstruction`: Invalid opcode
+    /// - `InvalidIntegerEncoding`: Invalid index encoding
+    pub fn parse_reference_instruction(&mut self) -> ParseResult<ast::ReferenceInstruction> {
+        let opcode = self.parse_byte()?;
+        parser_debug_log!(&self.config, "Parsing reference instruction with opcode: 0x{:02X}", opcode);
+        match opcode {
+            0xD0 => {
+                // ref.null
+                let ref_type = self.parse_ref_type()?;
+                Ok(ast::ReferenceInstruction::RefNull(ref_type))
+            }
+            0xD1 => {
+                // ref.is_null
+                Ok(ast::ReferenceInstruction::RefIsNull)
+            }
+            0xD2 => {
+                // ref.func
+                let func_index = self.parse_u32()?;
+                Ok(ast::ReferenceInstruction::RefFunc(func_index))
+            }
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode,
+                position: self.cursor - 1,
+            }),
+        }
+    }
+
+    /// Parse a reference type
+    /// 
+    /// # Specification
+    /// 
+    /// Reference types are encoded as:
+    /// 
+    /// ```
+    /// reftype ::= 0x70 ⇒ funcref
+    ///           | 0x6F ⇒ externref
+    /// ```
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// // funcref
+    /// 0x70
+    /// 
+    /// // externref
+    /// 0x6F
+    /// ```
+    /// 
+    /// # Errors
+    /// 
+    /// - `UnexpectedEof`: Input ends unexpectedly
+    /// - `InvalidInstruction`: Invalid reference type
+    pub fn parse_ref_type(&mut self) -> ParseResult<ast::ValType> {
+        let byte = self.parse_byte()?;
+        match byte {
+            0x70 => Ok(ast::ValType::FuncRef),
+            0x6F => Ok(ast::ValType::ExternRef),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode: byte,
+                position: self.cursor - 1,
+            }),
+        }
+    }
+
+    /// Parse a value type
+    /// 
+    /// # Specification
+    /// 
+    /// Value types are encoded as:
+    /// 
+    /// ```
+    /// valtype ::= 0x7F ⇒ i32
+    ///           | 0x7E ⇒ i64
+    ///           | 0x7D ⇒ f32
+    ///           | 0x7C ⇒ f64
+    ///           | 0x7B ⇒ v128
+    ///           | 0x70 ⇒ funcref
+    ///           | 0x6F ⇒ externref
+    /// ```
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// // i32
+    /// 0x7F
+    /// 
+    /// // f64
+    /// 0x7C
+    /// ```
+    /// 
+    /// # Errors
+    /// 
+    /// - `UnexpectedEof`: Input ends unexpectedly
+    /// - `InvalidInstruction`: Invalid value type
+    pub fn parse_val_type(&mut self) -> ParseResult<ast::ValType> {
+        let byte = self.parse_byte()?;
+        match byte {
+            0x7F => Ok(ast::ValType::I32),
+            0x7E => Ok(ast::ValType::I64),
+            0x7D => Ok(ast::ValType::F32),
+            0x7C => Ok(ast::ValType::F64),
+            0x7B => Ok(ast::ValType::V128),
+            0x70 => Ok(ast::ValType::FuncRef),
+            0x6F => Ok(ast::ValType::ExternRef),
+            _ => Err(ParseError::InvalidInstructionWithDetails {
+                opcode: byte,
+                position: self.cursor - 1,
+            }),
+        }
     }
 }
