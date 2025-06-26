@@ -82,6 +82,8 @@ pub mod trap;
 pub mod virtio_disk;
 #[cfg(all(target_os = "none", feature = "kernel"))]
 pub mod vm;
+#[cfg(all(target_os = "none", feature = "kernel"))]
+pub mod wasm;
 
 #[macro_export]
 macro_rules! kmain {
