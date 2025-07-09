@@ -4,8 +4,6 @@
     feature(alloc_error_handler)
 )]
 #![cfg_attr(all(target_os = "none", feature = "kernel"), feature(allocator_api))]
-#![feature(negative_impls)]
-#![feature(fn_align)]
 #![feature(variant_count)]
 #![allow(clippy::missing_safety_doc)]
 
@@ -86,7 +84,7 @@ pub mod vm;
 #[macro_export]
 macro_rules! kmain {
     ($path:path) => {
-        #[export_name = "main"]
+        #[unsafe(export_name = "main")]
         pub extern "C" fn __main() -> ! {
             // type check the given path
             let f: extern "C" fn() -> ! = $path;

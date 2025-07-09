@@ -15,7 +15,7 @@ use crate::{
     vm::Addr,
 };
 
-extern "C" {
+unsafe extern "C" {
     fn uservec();
     fn userret();
 }
@@ -29,7 +29,7 @@ pub enum Intr {
 pub static TICKS: Mutex<usize> = Mutex::new(0, "time");
 
 // set up to take exceptions and traps while in the kernel.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn inithart() {
     unsafe {
         stvec::write(kernelvec as usize, stvec::TrapMode::Direct);
@@ -40,7 +40,7 @@ pub fn inithart() {
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.rs
 //
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn usertrap() -> ! {
     assert!(
         sstatus::read().spp() == sstatus::SPP::User,
@@ -116,7 +116,7 @@ pub extern "C" fn usertrap() -> ! {
 //
 // return to user space
 //
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn usertrap_ret() -> ! {
     let p = Cpus::myproc().unwrap();
 
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn usertrap_ret() -> ! {
 
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn kerneltrap() {
     let which_dev;
     let sepc = sepc::read();

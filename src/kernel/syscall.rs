@@ -7,7 +7,7 @@ use crate::{
     defs::AsBytes,
     exec::exec,
     fcntl::{FcntlCmd, OMode},
-    file::{FType, File, FTABLE},
+    file::{FTABLE, FType, File},
     fs::{self, Path},
     log::LOG,
     param::{MAXARG, MAXPATH},
@@ -277,7 +277,9 @@ impl Arg for Envp {
         let mut buf = [0u8; PGSIZE];
         let addr = UVAddr::from(argraw(n));
 
-        let Some(n) = fetch_slice(Slice::Ref(addr), input)? else { return Ok(envp) };
+        let Some(n) = fetch_slice(Slice::Ref(addr), input)? else {
+            return Ok(envp);
+        };
         for (i, &env) in input.iter().take(n).enumerate() {
             if let Some(len) = fetch_slice(Slice::Buf(env), &mut buf).unwrap() {
                 let env_str = str::from_utf8_mut(&mut buf[..len])
@@ -833,11 +835,14 @@ pub {} {{
             },
             indent = indent
         );
-        let mut gen: Vec<String> = Vec::new();
-        gen.push(part1);
-        gen.append(&mut part2);
-        gen.push(part3);
-        gen.push(part4);
-        gen.iter().flat_map(|s| s.chars()).collect::<String>()
+        let mut gen_syscall: Vec<String> = Vec::new();
+        gen_syscall.push(part1);
+        gen_syscall.append(&mut part2);
+        gen_syscall.push(part3);
+        gen_syscall.push(part4);
+        gen_syscall
+            .iter()
+            .flat_map(|s| s.chars())
+            .collect::<String>()
     }
 }

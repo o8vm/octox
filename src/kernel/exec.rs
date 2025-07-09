@@ -6,7 +6,7 @@ use crate::{
     memlayout::STACK_PAGE_NUM,
     param::MAXARG,
     proc::Cpus,
-    riscv::{pgroundup, pteflags, PGSIZE},
+    riscv::{PGSIZE, pgroundup, pteflags},
     sleeplock::SleepLockGuard,
     vm::{Addr, UVAddr, Uvm, VirtAddr},
 };
@@ -53,7 +53,7 @@ impl Uvm {
 }
 
 #[allow(clippy::redundant_closure_call)]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn exec(
     path: &Path,
     argv: [Option<String>; MAXARG],

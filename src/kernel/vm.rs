@@ -4,7 +4,7 @@ use crate::memlayout::{
     KERNBASE, PHYSTOP, PLIC, STACK_PAGE_NUM, TRAMPOLINE, TRAPFRAME, UART0, VIRTIO0,
 };
 use crate::proc::PROCS;
-use crate::riscv::{pgroundup, pteflags::*, registers::satp, sfence_vma, PGSHIFT, PGSIZE};
+use crate::riscv::{PGSHIFT, PGSIZE, pgroundup, pteflags::*, registers::satp, sfence_vma};
 use crate::sync::OnceLock;
 use alloc::boxed::Box;
 use core::cmp::{Ord, PartialEq, PartialOrd};
@@ -14,7 +14,7 @@ use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, Deref, DerefMut, Index, IndexMut, Sub, SubAssign};
 
 use crate::trampoline::trampoline; // trampoline.rs
-extern "C" {
+unsafe extern "C" {
     // kernel.ld sets this to end of kernel code.
     fn etext();
 }

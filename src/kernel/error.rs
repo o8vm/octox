@@ -110,6 +110,44 @@ impl Error {
     }
 }
 
+impl From<isize> for Error {
+    fn from(value: isize) -> Self {
+        use Error::*;
+        match value {
+            -2 => ResourceBusy,
+            -3 => NotFound,
+            -4 => OutOfMemory,
+            -5 => BadVirtAddr,
+            -6 => StorageFull,
+            -7 => TooManyLinks,
+            -8 => NoSuchProcess,
+            -9 => WouldBlock,
+            -10 => NoBufferSpace,
+            -11 => NoChildProcesses,
+            -12 => Interrupted,
+            -13 => BadFileDescriptor,
+            -14 => FileDescriptorTooLarge,
+            -15 => FileTooLarge,
+            -16 => AlreadyExists,
+            -17 => IsADirectory,
+            -18 => NotADirectory,
+            -19 => CrossesDevices,
+            -20 => PermissionDenied,
+            -21 => DirectoryNotEmpty,
+            -22 => FileTableOverflow,
+            -23 => InvalidArgument,
+            -24 => NoSuchNode,
+            -25 => BrokenPipe,
+            -26 => ExecFileFormatError,
+            -27 => ArgumentListTooLong,
+            -28 => Utf8Error,
+            -29 => WriteZero,
+            -30 => NotConnected,
+            _ => Uncategorized,
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())

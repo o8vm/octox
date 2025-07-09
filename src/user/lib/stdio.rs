@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use crate::fs::File;
 use crate::io::{self, Read, Write};
 use crate::mutex::Mutex;
-use crate::sys::{self, sync::OnceLock, Error::AlreadyExists, Error::Utf8Error};
+use crate::sys::{self, Error::AlreadyExists, Error::Utf8Error, sync::OnceLock};
 use core::fmt;
 
 pub const STDIN_FILENO: usize = 0;
@@ -19,6 +19,7 @@ pub struct Stdin {
     inner: &'static mut OnceLock<Mutex<File>>,
 }
 
+#[allow(static_mut_refs)]
 pub fn stdin() -> Stdin {
     unsafe { Stdin { inner: &mut STDIN } }
 }
@@ -62,6 +63,7 @@ pub struct Stdout {
     inner: &'static mut OnceLock<Mutex<File>>,
 }
 
+#[allow(static_mut_refs)]
 pub fn stdout() -> Stdout {
     unsafe { Stdout { inner: &mut STDOUT } }
 }
@@ -88,6 +90,7 @@ pub struct Stderr {
     inner: &'static mut OnceLock<Mutex<File>>,
 }
 
+#[allow(static_mut_refs)]
 pub fn stderr() -> Stderr {
     unsafe { Stderr { inner: &mut STDERR } }
 }

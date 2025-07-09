@@ -5,7 +5,7 @@ use crate::error::{Error::*, Result};
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use crate::fcntl::{FcntlCmd, OMode};
 #[cfg(all(target_os = "none", feature = "kernel"))]
-use crate::fs::{create, IData, Inode, Path, BSIZE};
+use crate::fs::{BSIZE, IData, Inode, Path, create};
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use crate::log::LOG;
 #[cfg(all(target_os = "none", feature = "kernel"))]
@@ -178,8 +178,8 @@ impl VFile {
     pub fn stat(&self, addr: VirtAddr) -> Result<()> {
         let mut stat: Stat = Default::default();
 
-        match self {
-            VFile::Device(DNod { driver: _, ref ip }) | VFile::Inode(FNod { off: _, ref ip }) => {
+        match &self {
+            VFile::Device(DNod { driver: _, ip }) | VFile::Inode(FNod { off: _, ip }) => {
                 {
                     ip.lock().stat(&mut stat);
                 }

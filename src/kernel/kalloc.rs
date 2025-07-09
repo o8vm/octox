@@ -6,7 +6,7 @@ use crate::spinlock::Mutex;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 
-extern "C" {
+unsafe extern "C" {
     // first address after kernel.
     // defined by kernel.ld
     static mut end: [u8; 0];

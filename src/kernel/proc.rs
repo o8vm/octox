@@ -6,7 +6,7 @@ use crate::exec::flags2perm;
 use crate::file::File;
 use crate::fs::{self, Inode};
 use crate::log::LOG;
-use crate::memlayout::{kstack, STACK_PAGE_NUM, TRAMPOLINE, TRAPFRAME};
+use crate::memlayout::{STACK_PAGE_NUM, TRAMPOLINE, TRAPFRAME, kstack};
 use crate::param::*;
 use crate::riscv::{pteflags::*, *};
 use crate::spinlock::{Mutex, MutexGuard};
@@ -14,7 +14,7 @@ use crate::swtch::swtch;
 use crate::sync::{LazyLock, OnceLock};
 use crate::trampoline::trampoline;
 use crate::trap::usertrap_ret;
-use crate::vm::{Addr, KVAddr, PAddr, PageAllocator, UVAddr, Uvm, VirtAddr, KVM};
+use crate::vm::{Addr, KVAddr, KVM, PAddr, PageAllocator, UVAddr, Uvm, VirtAddr};
 use crate::{array, println};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -743,8 +743,8 @@ pub fn exit(status: i32) -> ! {
         let mut parents = PROCS.parents.lock();
         // Pass p's abandoned children to init.
         for opp in parents.iter_mut().filter(|pp| pp.is_some()) {
-            match opp {
-                Some(ref pp) if Arc::ptr_eq(pp, &p) => {
+            match &opp {
+                Some(pp) if Arc::ptr_eq(pp, &p) => {
                     let initproc = INITPROC.get().unwrap();
                     opp.replace(Arc::clone(initproc));
                     self::wakeup(Arc::as_ptr(initproc) as usize);

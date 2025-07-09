@@ -8,7 +8,7 @@ use core::hint::unreachable_unchecked;
 #[repr(C, align(16))]
 struct Stack([u8; 4096 * STACK_PAGE_NUM * NCPU]);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 static mut STACK0: Stack = Stack([0; 4096 * STACK_PAGE_NUM * NCPU]);
 
 pub unsafe fn start() -> ! {
@@ -43,7 +43,7 @@ pub unsafe fn start() -> ! {
     // switch to supervisor mode and jump to main().
     asm!("mret");
 
-    extern "C" {
+    unsafe extern "C" {
         fn main() -> !;
     }
     unreachable_unchecked();

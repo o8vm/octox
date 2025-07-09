@@ -308,6 +308,7 @@ impl<'a> Command<'a> {
                 .map(|s| Some(s.as_str()))
                 .collect::<Vec<Option<&str>>>()
         });
+        #[allow(static_mut_refs)]
         let envp: Option<&[Option<&str>]> = binding.as_deref().or(unsafe { ENVIRON.as_deref() });
         let (ours, theirs) = self.setup_io(default, needs_stdin)?;
         let (mut input, mut output) = pipe::pipe()?;

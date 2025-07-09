@@ -34,7 +34,7 @@ impl<T> Mutex<T> {
 
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn get_mut(&self) -> &mut T {
-        &mut *self.value.get()
+        unsafe { &mut *self.value.get() }
     }
 }
 

@@ -1,14 +1,11 @@
-cargo-features = ["per-package-target"]
-
 [package]
 name = "libkernel"
 description = "A Rust-based library kernel"
 authors = ["Hayato Ohhashi <o8@vmm.dev>"]
-edition = "2021"
+edition = "2024"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
-forced-target = "riscv64gc-unknown-none-elf"
 
 [lib]
 name = "kernel"

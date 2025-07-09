@@ -11,14 +11,13 @@
 use crate::memlayout::TRAPFRAME;
 use core::arch::naked_asm;
 
-extern "C" {
+unsafe extern "C" {
     pub fn trampoline();
 }
 
-#[link_section = "trampsec"]
+#[unsafe(link_section = "trampsec")]
+#[unsafe(no_mangle)]
 #[unsafe(naked)]
-#[no_mangle]
-#[repr(align(16))]
 pub unsafe extern "C" fn uservec() -> ! {
     // trap.rs sets stvec to point here, so
     // traps from user space start here,
@@ -26,6 +25,7 @@ pub unsafe extern "C" fn uservec() -> ! {
     // user page table.
 
     naked_asm!(
+        ".align 4",
         // save user a0 in sscratch so
         // a0 can be used to get at TRAPFRAME
         "csrw sscratch, a0",
@@ -88,10 +88,9 @@ pub unsafe extern "C" fn uservec() -> ! {
     );
 }
 
-#[link_section = "trampsec"]
+#[unsafe(link_section = "trampsec")]
+#[unsafe(no_mangle)]
 #[unsafe(naked)]
-#[no_mangle]
-#[repr(align(16))]
 pub unsafe extern "C" fn userret(pagetable: usize) -> ! {
     // userret(TRAPFLAME, pagetable)
     // called by usertrap_ret() in trap.rs to
@@ -100,6 +99,7 @@ pub unsafe extern "C" fn userret(pagetable: usize) -> ! {
     // a1: user page table, for satp.
 
     naked_asm!(
+        ".align 4",
         // switch to the user page table.
         "sfence.vma zero, zero",
         "csrw satp, a0",

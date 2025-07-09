@@ -3,10 +3,10 @@ use core::arch::naked_asm;
 // interrupts and exceptions while in supervisor mode come here.
 // push all registers, call kerneltrap(), restorem return.
 #[unsafe(naked)]
-#[repr(align(16))]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn kernelvec() -> ! {
     naked_asm!(
+        ".align 4",
         // make room to save registers.
         "addi sp, sp, -256",
         // save the registers.
@@ -81,9 +81,8 @@ pub unsafe extern "C" fn kernelvec() -> ! {
     );
 }
 
+#[unsafe(no_mangle)]
 #[unsafe(naked)]
-#[repr(align(16))] // if miss this alignment, a load access fault will occur.
-#[no_mangle]
 pub unsafe extern "C" fn timervec() -> ! {
     // start.rs has set up the memory that mscratch points to:
     // scratch[0,8,16] : register save area.
@@ -99,6 +98,7 @@ pub unsafe extern "C" fn timervec() -> ! {
     // a0 saved in mscrach, a1 ~ a3 saved in scratch space.
     //loop {}
     naked_asm!(
+        ".align 4",
         "csrrw a0, mscratch, a0",
         "sd a1, 0(a0)",
         "sd a2, 8(a0)",
