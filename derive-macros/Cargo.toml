@@ -10,3 +10,8 @@ proc-macro = true
 
 [dependencies]
 libkernel = { path = "../src/kernel" }
+
+[features]
+default = []
+kernel = []
+user = []

@@ -75,6 +75,9 @@ pub enum Type {
     Str { mutable: bool },
     /// An optional type (Option<T>)
     Option { inner: Box<Type> },
+    /// A custom type that preserves the original tokens
+    /// This is used for types like Stat that implement AsBytes
+    Custom(proc_macro::TokenStream),
 }
 
 /// Primitive value types supported in syscall definitions
@@ -83,7 +86,7 @@ pub enum Type {
 /// syscall parameters or returned from syscalls. It includes standard
 /// Rust primitive types as well as kernel-specific types like file
 /// descriptors and process IDs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ValueType {
     /// 8-bit signed integer
     I8,
@@ -117,6 +120,8 @@ pub enum ValueType {
     Fd,
     /// Process ID (kernel-specific type)
     PId,
+    /// Custom type (e.g., Stat, any type implementing AsBytes)
+    Custom(String),
 }
 
 /// Display implementation for ValueType
@@ -142,6 +147,7 @@ impl fmt::Display for ValueType {
             ValueType::Char => "char",
             ValueType::Fd => "Fd",
             ValueType::PId => "PId",
+            ValueType::Custom(s) => return write!(f, "{}", s),
         };
         write!(f, "{}", name)
     }

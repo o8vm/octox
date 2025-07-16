@@ -31,15 +31,18 @@ fn emit_trait(registry: &ir::SyscallRegistry) -> TokenStream {
 
         #[cfg(all(target_os = "none", feature = "kernel"))]
         trait SyscallDispatch {
-            // Default implementation for kernel syscalls
-            fn copyin<T>(dst: &mut T, src: usize) -> Result<()> {
-                unimplemented!("copyin is not implemented for kernel syscalls");
+            fn copyin<T: AsBytes>(dst: &mut T, src: usize) -> Result<(), Error> {
+                unimplemented!("copyin must be implemented by kernel")
             }
-
-            fn dispatch(tf: &mut ir::TrapFrame) -> Result<()> {
+            
+            fn dispatch(tf: &mut TrapFrame) -> Result<(), Error> {
                 #dispatch_body
             }
-
+            
+            fn copyout<T: AsBytes>(dst: usize, src: &T) -> Result<(), Error> {
+                unimplemented!("copyout must be implemented by kernel")
+            }
+            
             #syscall_signatures
         }
 
@@ -112,6 +115,10 @@ fn emit_type(ty: &ir::Type) -> TokenStream {
         ir::Type::Option { inner } => {
             let inner_ty = emit_type(inner);
             quote!(Option<#inner_ty>)
+        },
+        ir::Type::Custom(tokens) => {
+            // 元のトークンストリームをそのまま使用
+            tokens.clone()
         },
     }
 }
@@ -194,8 +201,8 @@ fn emit_user_body_generic<A: ArchSpec>(syscall: &ir::Syscall) -> TokenStream {
                         lateout(@out_reg) _ret,
                     );
                 }
-                use crate::syscall::syscall_return::FromSyscallRaw;
-                <#ret_conversion>::from_syscall_raw(_ret)
+                use crate::syscall_return::FromIsize;
+                <#ret_conversion>::from_isize(_ret)
             }
         },
     }
@@ -222,11 +229,16 @@ fn emit_register_assignments<A: ArchSpec>(params: &[ir::Param]) -> TokenStream {
             ir::Type::Ref { .. } | ir::Type::Slice { ..} | ir::Type::Str { .. } => {
                 // 本当か？
                 // we treat slice(including str) as referece to its value? like &@name
-                quote!(in(&reg_lit) @name as *const _ as usize,)
+                quote!(in(@reg_lit) @name as *const _ as usize,)
             },
             ir::Type::Option { .. } => {
                 // we use Option as a wrapper for pointers
-                quote!(in(&reg_lit) &@name as *const _ as usize, )
+                quote!(in(@reg_lit) &@name as *const _ as usize,)
+            },
+            ir::Type::Custom(_) => {
+                // Custom types should not appear directly as parameters
+                // They should be wrapped in Ref
+                panic!("Custom types must be passed by reference")
             },
         };
         assignments.extend(assignment);
@@ -255,13 +267,12 @@ fn emit_dispatch_body(registry: &ir::SyscallRegistry) -> TokenStream {
     }
 
     quote!(
-        let result = match tf.syscall_id as u16 {
+        let result = match tf.syscall_num as u16 {
             #match_arms
-            _ => {
-                Err(Errno::ENOSYS),
-            }
+            _ => Err(Error::ENOSYS),
         };
-        tf.set_return(result.into_syscall_raw() as usize);
+        
+        tf.set_return(result.into_isize() as usize);
         Ok(())
     )
 }
@@ -270,11 +281,39 @@ fn emit_syscall_handler(syscall: &ir::Syscall) -> TokenStream {
     let method = &syscall.rust_name;
     let args_fetch = emit_handler_args(&syscall.params);
     let args_pass = emit_args_conversion(&syscall.params);
-
-    quote!({
-        #args_fetch
-        Self::@method(#args_pass)
-    })
+    
+    // &mut パラメータがある場合の特別な処理を確認
+    let mut has_mutable_ref = false;
+    let mut mutable_ref_index = 0;
+    let mut mutable_ref_type = None;
+    
+    for (i, param) in syscall.params.iter().enumerate() {
+        if let ir::Type::Ref { mutable: true, inner } = &param.ty {
+            has_mutable_ref = true;
+            mutable_ref_index = i;
+            mutable_ref_type = Some(inner.clone());
+            break;
+        }
+    }
+    
+    if has_mutable_ref {
+        let arg_name = Ident::new(&format!("arg{}", mutable_ref_index), Span::call_site());
+        let arg_ptr_name = Ident::new(&format!("arg{}_ptr", mutable_ref_index), Span::call_site());
+        
+        quote!({
+            #args_fetch
+            let result = Self::@method(#args_pass)?;
+            
+            Self::copyout(@arg_ptr_name, &@arg_name)?;
+            
+            Ok(result)
+        })
+    } else {
+        quote!({
+            #args_fetch
+            Self::@method(#args_pass)
+        })
+    }
 }
 
 fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
@@ -286,83 +325,207 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
 
         let fetch = match &param.ty {
             ir::Type::Value(ir::ValueType::Fd) => {
-                quote!(let @arg_name = Fd::from(ft.arg(@index));)
+                quote!(let @arg_name = Fd(tf.arg(@index));)
             },
             ir::Type::Value(ir::ValueType::PId) => {
-                quote!(let @arg_name = PId::from(ft.arg(@index));)
+                quote!(let @arg_name = PId(tf.arg(@index));)
             },
             ir::Type::Value(_) => {
-                quote!(let @arg_name = ft.arg(@index) as _;)
+                quote!(let @arg_name = tf.arg(@index) as _;)
             },
             ir::Type::Ptr { .. } => {
                 // 生ポインタはユーザー空間のアドレスとして解釈
-                quote!(let @arg_name = ft.arg(@index) as _;)
+                quote!(let @arg_name = tf.arg(@index) as _;)
             },
-            ir::Type::Ref { inner, .. } => {
+            ir::Type::Ref { inner, mutable } => {
                 let inner_ty = emit_type(inner);
-
-                quote!(
-                    let @arg_name = {
-                        let addr = ft.arg(@index);
-                        let mut value: #inner_ty = Default::default();
-                        Self::copyin(&mut value, addr)?;
-                        Box::new(value)
-                    };
-                )
+                
+                if *mutable {
+                    let arg_ptr_name = Ident::new(&format!("arg{}_ptr", i), Span::call_site());
+                    quote!(
+                        let @arg_ptr_name = tf.arg(@index);
+                        let mut @arg_name: #inner_ty = Default::default();
+                        Self::copyin(&mut @arg_name, @arg_ptr_name)?;
+                    )
+                } else {
+                    quote!(
+                        let @arg_name = {
+                            let addr = tf.arg(@index);
+                            let mut value: #inner_ty = Default::default();
+                            Self::copyin(&mut value, addr)?;
+                            value
+                        };
+                    )
+                }
             }
             ir::Type::Slice { inner, .. } => {
-                let inner_ty = emit_type(inner);
+                match inner.as_ref() {
+                    // &[&str]の場合
+                    ir::Type::Str { .. } => {
+                        quote!(
+                            let @arg_name = {
+                                let mut fat: (*const (*const u8, usize), usize) = (core::ptr::null(), 0);
+                                Self::copyin(&mut fat, tf.arg(@index))?;
+                                
+                                let mut str_fats = vec![(core::ptr::null(), 0usize); fat.1];
+                                Self::copyin(&mut str_fats[..], fat.0 as usize)?;
+                                
+                                let mut argv_vec = Vec::with_capacity(fat.1);
+                                for str_fat in str_fats {
+                                    let mut buf = vec![0u8; str_fat.1];
+                                    Self::copyin(&mut buf[..], str_fat.0 as usize)?;
+                                    
+                                    let s = String::from_utf8(buf)
+                                        .map_err(|_| Error::EINVAL)?;
+                                    argv_vec.push(s);
+                                }
+                                argv_vec
+                            };
+                        )
+                    },
+                    // その他の&[T]の場合
+                    _ => {
+                        let inner_ty = emit_type(inner);
+                        quote!(
+                            let @arg_name = {
+                                let mut fat: (*const #inner_ty, usize) = (core::ptr::null(), 0);
+                                Self::copyin(&mut fat, tf.arg(@index))?;
 
-                quote!(
-                    let @arg_name = {
-                        let mut fat: (*const #inner_ty, usize) = (core::ptr::null(), 0);
-                        Self::copyin(&mut fat, ft.arg(@index))?;
+                                let mut buf = vec![Default::default(); fat.1];
+                                Self::copyin(&mut buf[..], fat.0 as usize)?;
 
-                        let mut buf = vec![Default::default(); fat.1];
-                        Self::copyin(&mut buf, fat.0 as usize)?;
-
-                        buf
-                    };
-                )
+                                buf
+                            };
+                        )
+                    }
+                }
             },
             ir::Type::Str { .. } => {
                 quote!(
                     let @arg_name =  {
                         let mut fat: (*const u8, usize) = (core::ptr::null(), 0);
-                        Self::copyin(&mut fat, ft.arg(@index))?;
+                        Self::copyin(&mut fat, tf.arg(@index))?;
 
                         let mut buf = vec![0u8; fat.1];
-                        Self::copyin(&mut buf, fat.0 as usize)?;
+                        Self::copyin(&mut buf[..], fat.0 as usize)?;
 
                         String::from_utf8(buf)
-                            .map_err(|_| Errno::EINVAL)?
+                            .map_err(|_| Error::EINVAL)?
                     };
                 )
             },
             ir::Type::Option { inner } => {
                 match inner.as_ref() {
-                    ir::Type::Slice { inner, .. } => {
-                        let inner_ty = emit_type(inner);
-                        quote!(
-                            let @arg_name = {
-                                let opt_addr = ft.arg(@index);
-                                if opt_addr == 0 {
-                                    None
+                    ir::Type::Slice { inner: inner_slice, .. } => {
+                        match inner_slice.as_ref() {
+                            // Option<&[Option<&str>]>の場合
+                            ir::Type::Option { inner: opt_inner } => {
+                                if matches!(opt_inner.as_ref(), ir::Type::Str { .. }) {
+                                    quote!(
+                                        let @arg_name = {
+                                            let opt_addr = tf.arg(@index);
+                                            if opt_addr == 0 {
+                                                None
+                                            } else {
+                                                let mut fat: (*const usize, usize) = (core::ptr::null(), 0);
+                                                Self::copyin(&mut fat, opt_addr)?;
+                                                
+                                                let mut opt_ptrs = vec![0usize; fat.1];
+                                                Self::copyin(&mut opt_ptrs[..], fat.0 as usize)?;
+                                                
+                                                let mut envp_vec = Vec::with_capacity(fat.1);
+                                                for opt_ptr in opt_ptrs {
+                                                    if opt_ptr == 0 {
+                                                        envp_vec.push(None);
+                                                    } else {
+                                                        let mut str_fat: (*const u8, usize) = (core::ptr::null(), 0);
+                                                        Self::copyin(&mut str_fat, opt_ptr)?;
+                                                        
+                                                        let mut buf = vec![0u8; str_fat.1];
+                                                        Self::copyin(&mut buf[..], str_fat.0 as usize)?;
+                                                        
+                                                        let s = String::from_utf8(buf)
+                                                            .map_err(|_| Error::EINVAL)?;
+                                                        envp_vec.push(Some(s));
+                                                    }
+                                                }
+                                                Some(envp_vec)
+                                            }
+                                        };
+                                    )
                                 } else {
-                                    let mut fat: (*const #inner_ty, usize) = (core::ptr::null(), 0);
-                                    Self::copyin(&mut fat, opt_addr)?;
+                                    // その他のOption<&[Option<T>]>の場合
+                                    let inner_ty = emit_type(inner_slice);
+                                    quote!(
+                                        let @arg_name = {
+                                            let opt_addr = tf.arg(@index);
+                                            if opt_addr == 0 {
+                                                None
+                                            } else {
+                                                let mut fat: (*const #inner_ty, usize) = (core::ptr::null(), 0);
+                                                Self::copyin(&mut fat, opt_addr)?;
 
-                                    let mut buf = vec![Default::default(); fat.1];
-                                    Self::copyin(&mut buf, fat.0 as usize)?;
-                                    Some(buf)
+                                                let mut buf = vec![Default::default(); fat.1];
+                                                Self::copyin(&mut buf[..], fat.0 as usize)?;
+                                                Some(buf)
+                                            }
+                                        };
+                                    )
                                 }
-                            };
-                        )
+                            },
+                            // Option<&[&str]>の場合
+                            ir::Type::Str { .. } => {
+                                quote!(
+                                    let @arg_name = {
+                                        let opt_addr = tf.arg(@index);
+                                        if opt_addr == 0 {
+                                            None
+                                        } else {
+                                            let mut fat: (*const (*const u8, usize), usize) = (core::ptr::null(), 0);
+                                            Self::copyin(&mut fat, opt_addr)?;
+                                            
+                                            let mut str_fats = vec![(core::ptr::null(), 0usize); fat.1];
+                                            Self::copyin(&mut str_fats[..], fat.0 as usize)?;
+                                            
+                                            let mut string_vec = Vec::with_capacity(fat.1);
+                                            for str_fat in str_fats {
+                                                let mut buf = vec![0u8; str_fat.1];
+                                                Self::copyin(&mut buf[..], str_fat.0 as usize)?;
+                                                
+                                                let s = String::from_utf8(buf)
+                                                    .map_err(|_| Error::EINVAL)?;
+                                                string_vec.push(s);
+                                            }
+                                            Some(string_vec)
+                                        }
+                                    };
+                                )
+                            },
+                            // その他のOption<&[T]>の場合
+                            _ => {
+                                let inner_ty = emit_type(inner_slice);
+                                quote!(
+                                    let @arg_name = {
+                                        let opt_addr = tf.arg(@index);
+                                        if opt_addr == 0 {
+                                            None
+                                        } else {
+                                            let mut fat: (*const #inner_ty, usize) = (core::ptr::null(), 0);
+                                            Self::copyin(&mut fat, opt_addr)?;
+
+                                            let mut buf = vec![Default::default(); fat.1];
+                                            Self::copyin(&mut buf[..], fat.0 as usize)?;
+                                            Some(buf)
+                                        }
+                                    };
+                                )
+                            }
+                        }
                     }, 
                     ir::Type::Str { .. } => {
                         quote!(
                             let @arg_name = {
-                                let opt_addr = ft.arg(@index);
+                                let opt_addr = tf.arg(@index);
                                 if opt_addr == 0 {
                                     None
                                 } else {
@@ -370,9 +533,9 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                                     Self::copyin(&mut fat, opt_addr)?;
 
                                     let mut buf = vec![0u8; fat.1];
-                                    Self::copyin(&mut buf, fat.0 as usize)?;
+                                    Self::copyin(&mut buf[..], fat.0 as usize)?;
                                     Some(String::from_utf8(buf)
-                                        .map_err(|_| Errno::EINVAL)?
+                                        .map_err(|_| Error::EINVAL)?
                                     )
                                 }
                             };
@@ -385,7 +548,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                                 if opt_addr == 0 {
                                     None
                                 } else {
-                                    Some(Fd::from(opt_addr))
+                                    Some(Fd(opt_addr))
                                 }
                             };
                         )
@@ -397,7 +560,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                                 if opt_addr == 0 {
                                     None
                                 } else {
-                                    Some(PId::from(opt_addr))
+                                    Some(PId(opt_addr))
                                 }
                             };
                         )
@@ -405,11 +568,11 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                     ir::Type::Value(_) => {
                         quote!(
                             let @arg_name = {
-                                let opt_addr = ft.arg(@index);
+                                let opt_addr = tf.arg(@index);
                                 if opt_addr == 0 {
                                     None
                                 } else {
-                                    Some(ft.arg(@index) as _)
+                                    Some(opt_addr as _)
                                 }
                             };
                         )
@@ -423,6 +586,11 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                         )
                     }
                 }
+            },
+            ir::Type::Custom(_) => {
+                // Custom types should not appear directly as parameters
+                // They should be wrapped in Ref
+                panic!("Custom types must be passed by reference")
             },
         };
         args.extend(fetch);
@@ -512,7 +680,7 @@ fn emit_from_usize(registry: &ir::SyscallRegistry) -> TokenStream {
         let id = Literal::u16_unsuffixed(syscall.id.0);
         match_arms.extend(quote!(@id => @enum_name::@variant,));
     }
-    match_arms = quote!(_ => @enum_name::Invalid,);
+    match_arms.extend(quote!(_ => @enum_name::Invalid,));
 
     quote!(
         impl @enum_name {

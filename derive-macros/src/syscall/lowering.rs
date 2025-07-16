@@ -36,11 +36,11 @@ fn lower_variant(variant: ast::Variant) -> Result<ir::Syscall> {
 
     let reg_count = params.len().min(MAX_ARG_REGS as usize) as u8;
 
-    if reg_count < MAX_ARG_REGS {
+    if params.len() > MAX_ARG_REGS as usize {
         return Err(Error::new(
             format!(
                 "too many parameters for syscall '{}': expected at most {} but got {}",
-                variant.name, MAX_ARG_REGS, reg_count
+                variant.name, MAX_ARG_REGS, params.len()
             ),
             Span::call_site(),
         ));
@@ -174,10 +174,10 @@ fn lower_param_type(ast_ty: &ast::Type) -> Result<ir::Type> {
         }
     }
 
-    Err(Error::new(
-        format!("unsupported type: {}", type_str),
-        ast_ty.span,
-    ))
+    // その他の型名は、カスタム型として扱う（例：Stat）
+    // AsBytes制約は生成されたコードのコンパイル時にチェックされる
+    // 元のトークンストリームを保持することで型安全性を保つ
+    Ok(ir::Type::Custom(ast_ty.tokens.clone()))
 }
 
 fn lower_return(ret: ast::ReturnType) -> Result<ir::ReturnType> {

@@ -67,6 +67,15 @@ macro_rules! quote_impl {
         let lit_str = stringify!($lit);
         let lit = if lit_str.starts_with('"') && lit_str.ends_with('"') {
             Literal::string(&lit_str[1..lit_str.len()-1])
+        } else if lit_str.ends_with("u8") {
+            let num_str = &lit_str[..lit_str.len()-2];
+            Literal::u8_unsuffixed(num_str.parse::<u8>().unwrap())
+        } else if lit_str.ends_with("u16") {
+            let num_str = &lit_str[..lit_str.len()-3];
+            Literal::u16_unsuffixed(num_str.parse::<u16>().unwrap())
+        } else if lit_str.ends_with("usize") {
+            let num_str = &lit_str[..lit_str.len()-5];
+            Literal::usize_unsuffixed(num_str.parse::<usize>().unwrap())
         } else if let Ok(n) = lit_str.parse::<usize>() {
             Literal::usize_unsuffixed(n)
         } else if let Ok(n) = lit_str.parse::<isize>() {
@@ -94,6 +103,24 @@ macro_rules! quote_impl {
     ($stream:ident, => $($rest:tt)*) => {
         $stream.extend(Some(TokenTree::Punct(Punct::new('=', Spacing::Joint))));
         $stream.extend(Some(TokenTree::Punct(Punct::new('>', Spacing::Alone))));
+        quote_impl!($stream, $($rest)*);
+    };
+    
+    ($stream:ident, == $($rest:tt)*) => {
+        $stream.extend(Some(TokenTree::Punct(Punct::new('=', Spacing::Joint))));
+        $stream.extend(Some(TokenTree::Punct(Punct::new('=', Spacing::Alone))));
+        quote_impl!($stream, $($rest)*);
+    };
+    
+    ($stream:ident, .. $($rest:tt)*) => {
+        $stream.extend(Some(TokenTree::Punct(Punct::new('.', Spacing::Joint))));
+        $stream.extend(Some(TokenTree::Punct(Punct::new('.', Spacing::Alone))));
+        quote_impl!($stream, $($rest)*);
+    };
+    
+    // Underscore (wildcard pattern)
+    ($stream:ident, _ $($rest:tt)*) => {
+        $stream.extend(Some(TokenTree::Ident(Ident::new("_", Span::call_site()))));
         quote_impl!($stream, $($rest)*);
     };
     

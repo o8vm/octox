@@ -16,7 +16,7 @@ use proc_macro::TokenStream;
 pub fn derive_syscalls_impl(input: TokenStream) -> TokenStream {
     match process(input) {
         Ok(tokens) => {
-            eprintln!("=== Output ===");
+            eprintln!("=== Generated Output ===");
             eprintln!("{}", tokens);
             tokens
         },
