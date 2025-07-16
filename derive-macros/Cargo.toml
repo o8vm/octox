@@ -1,0 +1,12 @@
+[package]
+name = "derive-macros"
+edition = "2024"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+libkernel = { path = "../src/kernel" }

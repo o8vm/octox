@@ -26,6 +26,21 @@ use core::mem::{size_of, size_of_val};
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use core::{concat, str};
 
+pub struct PId(pub usize);
+pub struct Fd(pub usize);
+
+impl From<usize> for Fd {
+    fn from(value: usize) -> Self {
+        Fd(value)
+    }
+}
+
+impl From<usize> for PId {
+    fn from(value: usize) -> Self {
+        PId(value)
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(usize)]
 pub enum SysCalls {
