@@ -21,7 +21,7 @@ members = [
     "src/kernel",
     "src/mkfs",
     "src/user",
-    "derive-macros"
+    "src/derive"
 ]
 
 [workspace.dependencies]

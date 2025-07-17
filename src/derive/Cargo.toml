@@ -7,9 +7,11 @@ repository.workspace = true
 
 [lib]
 proc-macro = true
+name = "derive"
+path = "lib.rs"
 
 [dependencies]
-libkernel = { path = "../src/kernel" }
+libkernel = { workspace = true }
 
 [features]
 default = []

@@ -1,6 +1,6 @@
 #![no_std]
 #![no_main]
-use derive_macros::Syscalls;
+use derive::Syscalls;
 
 // AsBytes trait for kernel types
 trait AsBytes {
