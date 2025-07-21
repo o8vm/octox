@@ -1,7 +1,7 @@
 use crate::{
     error::{Error::*, Result},
     fcntl::OMode,
-    file::{FType, File, FTABLE},
+    file::{FTABLE, FType, File},
     mpmc::*,
     proc::{either_copyin, either_copyout},
     vm::VirtAddr,

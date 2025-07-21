@@ -33,11 +33,7 @@ pub fn claim() -> Option<u32> {
         let hart = Cpus::cpu_id();
         let reg = PLIC_SCLAIM(hart) as *mut u32;
         let irq = reg.read_volatile();
-        if irq == 0 {
-            None
-        } else {
-            Some(irq)
-        }
+        if irq == 0 { None } else { Some(irq) }
     }
 }
 

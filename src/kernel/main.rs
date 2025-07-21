@@ -6,7 +6,7 @@ extern crate alloc;
 use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::{
     bio, console, kalloc, kmain, null, plic, println,
-    proc::{self, scheduler, user_init, Cpus},
+    proc::{self, Cpus, scheduler, user_init},
     trap, virtio_disk, vm,
 };
 

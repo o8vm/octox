@@ -113,7 +113,7 @@ impl<R: ?Sized + Read> Read for BufReader<R> {
 }
 
 pub struct Lines<B> {
-    buf: B
+    buf: B,
 }
 
 impl<B: BufRead> Iterator for Lines<B> {
@@ -130,7 +130,7 @@ impl<B: BufRead> Iterator for Lines<B> {
                     }
                 }
                 Some(Ok(buf))
-            },
+            }
             Err(e) => Some(Err(e)),
         }
     }
@@ -138,7 +138,7 @@ impl<B: BufRead> Iterator for Lines<B> {
 
 pub trait BufRead: Read {
     fn lines(self) -> Lines<Self>
-        where
+    where
         Self: Sized,
     {
         Lines { buf: self }

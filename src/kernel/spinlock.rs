@@ -1,6 +1,6 @@
 use crate::riscv::intr_get;
 
-use super::proc::{Cpu, Cpus, IntrLock, CPUS};
+use super::proc::{CPUS, Cpu, Cpus, IntrLock};
 use core::cell::UnsafeCell;
 use core::ops::{Deref, DerefMut, Drop};
 use core::{
@@ -60,7 +60,7 @@ impl<T> Mutex<T> {
     // Check whether this cpu is holding the lock.
     // Interrupts must be off.
     unsafe fn holding(&self) -> bool {
-        self.locked.load(Ordering::Relaxed) == CPUS.mycpu()
+        unsafe { self.locked.load(Ordering::Relaxed) == CPUS.mycpu() }
     }
 
     pub fn unlock(guard: MutexGuard<'_, T>) -> &'_ Mutex<T> {
@@ -69,15 +69,17 @@ impl<T> Mutex<T> {
 
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn get_mut(&self) -> &mut T {
-        &mut *self.data.get()
+        unsafe { &mut *self.data.get() }
     }
 
     // It is only safe when used in functions such as fork_ret(),
     // where passing guards is difficult.
     pub unsafe fn force_unlock(&self) {
-        assert!(self.holding(), "force unlock {}", self.name);
-        self.locked.store(ptr::null_mut(), Ordering::Release);
-        (&mut *CPUS.mycpu()).unlock()
+        unsafe {
+            assert!(self.holding(), "force unlock {}", self.name);
+            self.locked.store(ptr::null_mut(), Ordering::Release);
+            (&mut *CPUS.mycpu()).unlock()
+        }
     }
 }
 

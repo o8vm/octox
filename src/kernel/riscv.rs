@@ -33,13 +33,17 @@ pub mod registers {
         #[inline]
         unsafe fn _read() -> usize {
             let bits: usize;
-            asm!("csrr {}, mstatus", out(reg) bits);
+            unsafe {
+                asm!("csrr {}, mstatus", out(reg) bits);
+            }
             bits
         }
 
         #[inline]
         unsafe fn _write(bits: usize) {
-            asm!("csrw mstatus, {}", in(reg) bits);
+            unsafe {
+                asm!("csrw mstatus, {}", in(reg) bits);
+            }
         }
 
         // Machine Previous Privilege Mode
@@ -130,41 +134,51 @@ pub mod registers {
 
         #[inline]
         unsafe fn _write(bits: usize) {
-            asm!("csrw sstatus, {}", in(reg) bits);
+            unsafe {
+                asm!("csrw sstatus, {}", in(reg) bits);
+            }
         }
 
         // bit set
         #[inline]
         unsafe fn _set(bits: usize) {
-            asm!("csrs sstatus, {}", in(reg) bits);
+            unsafe {
+                asm!("csrs sstatus, {}", in(reg) bits);
+            }
         }
 
         // bit clear
         #[inline]
         unsafe fn _clear(bits: usize) {
-            asm!("csrc sstatus, {}", in(reg) bits);
+            unsafe {
+                asm!("csrc sstatus, {}", in(reg) bits);
+            }
         }
 
         #[inline]
         pub(in crate::riscv) unsafe fn set_sie() {
-            _set(SIE)
+            unsafe { _set(SIE) }
         }
 
         #[inline]
         pub(in crate::riscv) unsafe fn clear_sie() {
-            _clear(SIE)
+            unsafe { _clear(SIE) }
         }
 
         #[inline]
         pub unsafe fn set_spie() {
-            _set(SPIE);
+            unsafe {
+                _set(SPIE);
+            }
         }
 
         #[inline]
         pub unsafe fn set_spp(spp: SPP) {
-            match spp {
-                SPP::Supervisor => _set(SPP),
-                SPP::User => _clear(SPP),
+            unsafe {
+                match spp {
+                    SPP::Supervisor => _set(SPP),
+                    SPP::User => _clear(SPP),
+                }
             }
         }
     }
@@ -178,7 +192,9 @@ pub mod registers {
         // Supervisor Software Interrupt Pending
         #[inline]
         pub unsafe fn clear_ssoft() {
-            asm!("csrc sip, {}", in(reg) SSIP);
+            unsafe {
+                asm!("csrc sip, {}", in(reg) SSIP);
+            }
         }
     }
 
@@ -192,22 +208,30 @@ pub mod registers {
 
         #[inline]
         unsafe fn _set(bits: usize) {
-            asm!("csrs sie, {}", in(reg) bits);
+            unsafe {
+                asm!("csrs sie, {}", in(reg) bits);
+            }
         }
 
         #[inline]
         pub unsafe fn set_sext() {
-            _set(SEIE);
+            unsafe {
+                _set(SEIE);
+            }
         }
 
         #[inline]
         pub unsafe fn set_stimer() {
-            _set(STIE);
+            unsafe {
+                _set(STIE);
+            }
         }
 
         #[inline]
         pub unsafe fn set_ssoft() {
-            _set(SSIE);
+            unsafe {
+                _set(SSIE);
+            }
         }
     }
 
@@ -219,7 +243,9 @@ pub mod registers {
 
         #[inline]
         pub unsafe fn set_mtimer() {
-            asm!("csrs mie, {}", in(reg) MTIE);
+            unsafe {
+                asm!("csrs mie, {}", in(reg) MTIE);
+            }
         }
     }
 
@@ -251,7 +277,9 @@ pub mod registers {
         use core::arch::asm;
 
         pub unsafe fn set_all() {
-            asm!("csrw medeleg, {}", in(reg) 0xffff);
+            unsafe {
+                asm!("csrw medeleg, {}", in(reg) 0xffff);
+            }
         }
     }
 
@@ -261,7 +289,9 @@ pub mod registers {
 
         #[inline]
         pub unsafe fn set_all() {
-            asm!("csrw mideleg, {}", in(reg) 0xffff);
+            unsafe {
+                asm!("csrw mideleg, {}", in(reg) 0xffff);
+            }
         }
     }
 
@@ -273,7 +303,9 @@ pub mod registers {
 
         #[inline]
         pub unsafe fn write(addr: usize, mode: TrapMode) {
-            asm!("csrw stvec, {}", in(reg) addr + mode as usize);
+            unsafe {
+                asm!("csrw stvec, {}", in(reg) addr + mode as usize);
+            }
         }
     }
 
@@ -289,7 +321,9 @@ pub mod registers {
 
         #[inline]
         pub unsafe fn write(addr: usize, mode: TrapMode) {
-            asm!("csrw mtvec, {}", in(reg) addr + mode as usize);
+            unsafe {
+                asm!("csrw mtvec, {}", in(reg) addr + mode as usize);
+            }
         }
     }
 
@@ -322,22 +356,28 @@ pub mod registers {
         #[inline]
         pub unsafe fn set_pmp(index: usize, range: Range, permission: Permission, locked: bool) {
             assert!(index < 8);
-            let mut value = _read();
-            let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
-            value |= byte << (8 * index);
-            _write(value);
+            unsafe {
+                let mut value = _read();
+                let byte = (locked as usize) << 7 | (range as usize) << 3 | (permission as usize);
+                value |= byte << (8 * index);
+                _write(value);
+            }
         }
 
         #[inline]
         unsafe fn _read() -> usize {
             let bits: usize;
-            asm!("csrr {}, pmpcfg0", out(reg) bits);
+            unsafe {
+                asm!("csrr {}, pmpcfg0", out(reg) bits);
+            }
             bits
         }
 
         #[inline]
         unsafe fn _write(bits: usize) {
-            asm!("csrw pmpcfg0, {}", in(reg) bits);
+            unsafe {
+                asm!("csrw pmpcfg0, {}", in(reg) bits);
+            }
         }
     }
 
@@ -388,13 +428,17 @@ pub mod registers {
         #[inline]
         pub unsafe fn read() -> Satp {
             let bits: usize;
-            asm!("csrr {}, satp", out(reg) bits);
+            unsafe {
+                asm!("csrr {}, satp", out(reg) bits);
+            }
             Satp { bits }
         }
 
         #[inline]
         pub unsafe fn write(bits: usize) {
-            asm!("csrw satp, {}", in(reg) bits);
+            unsafe {
+                asm!("csrw satp, {}", in(reg) bits);
+            }
         }
 
         #[inline]
@@ -590,7 +634,9 @@ pub fn intr_get() -> bool {
 #[inline]
 pub unsafe fn sfence_vma() {
     // the zero, zero means flush all TLB entries
-    asm!("sfence.vma zero, zero");
+    unsafe {
+        asm!("sfence.vma zero, zero");
+    }
 }
 
 pub const PGSIZE: usize = 4096; // bytes per page

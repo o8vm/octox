@@ -111,11 +111,11 @@ impl<T> OnceLock<T> {
     }
 
     unsafe fn get_unchecked(&self) -> &T {
-        (*self.inner.get()).assume_init_ref()
+        unsafe { (*self.inner.get()).assume_init_ref() }
     }
 
     unsafe fn get_unchecked_mut(&mut self) -> &mut T {
-        (*self.inner.get()).assume_init_mut()
+        unsafe { (*self.inner.get()).assume_init_mut() }
     }
 
     fn unblock(&self, state: usize, order: Ordering) {

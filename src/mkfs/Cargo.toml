@@ -11,5 +11,5 @@ repository.workspace = true
 name = "mkfs"
 path = "main.rs"
 
-[dependencies]
-libkernel = { workspace = true }
+[target.'cfg(not(target_os = "none"))'.dependencies]
+libkernel = { workspace = true, default-features = false }

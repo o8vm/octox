@@ -55,7 +55,9 @@ impl Cpus {
     #[inline]
     pub unsafe fn cpu_id() -> usize {
         let id;
-        asm!("mv {0}, tp", out(reg) id);
+        unsafe {
+            asm!("mv {0}, tp", out(reg) id);
+        }
         id
     }
 
@@ -64,7 +66,7 @@ impl Cpus {
     // interrupts must be disabled.
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn mycpu(&self) -> *mut Cpu {
-        let id = Self::cpu_id();
+        let id = unsafe { Self::cpu_id() };
         self.0[id].get()
     }
 
@@ -344,11 +346,13 @@ impl Procs {
     pub unsafe fn mapstacks(&self) {
         use crate::vm::Stack;
         for (p, _) in self.pool.iter().enumerate() {
-            let pa = Stack::try_new_zeroed().unwrap() as usize;
-            let va = kstack(p);
-            KVM.get_mut()
-                .unwrap()
-                .map(va, pa.into(), PGSIZE * STACK_PAGE_NUM, PTE_R | PTE_W);
+            unsafe {
+                let pa = Stack::try_new_zeroed().unwrap() as usize;
+                let va = kstack(p);
+                KVM.get_mut()
+                    .unwrap()
+                    .map(va, pa.into(), PGSIZE * STACK_PAGE_NUM, PTE_R | PTE_W);
+            }
         }
     }
 
@@ -617,22 +621,25 @@ impl Default for ProcData {
 // A fork child's very first scheduling by shceduler()
 // will swtch to fork_ret().
 pub unsafe extern "C" fn fork_ret() -> ! {
-    static mut FIRST: bool = true;
+    unsafe {
+        static mut FIRST: bool = true;
 
-    // still holding "proc" lock from scheduler.
-    // force_unlock() from my_proc() is needed because the stack is different
-    Cpus::myproc().unwrap().inner.force_unlock();
+        // still holding "proc" lock from scheduler.
+        // force_unlock() from my_proc() is needed because the stack is different
+        Cpus::myproc().unwrap().inner.force_unlock();
 
-    if FIRST {
-        // File system initialization must be run in the context of a
-        // regular process (e.g., because it calls sleep), and thus cannot
-        // be run from main().
-        FIRST = false;
-        fs::init(ROOTDEV);
-        // register initproc here, because namei must be called after fs initialization.
-        INITPROC.get().unwrap().data_mut().cwd = Some(crate::fs::Path::new("/").namei().unwrap().1)
+        if FIRST {
+            // File system initialization must be run in the context of a
+            // regular process (e.g., because it calls sleep), and thus cannot
+            // be run from main().
+            FIRST = false;
+            fs::init(ROOTDEV);
+            // register initproc here, because namei must be called after fs initialization.
+            INITPROC.get().unwrap().data_mut().cwd =
+                Some(crate::fs::Path::new("/").namei().unwrap().1)
+        }
+        usertrap_ret()
     }
-    usertrap_ret()
 }
 
 // Print a process listing to console. For debugging.

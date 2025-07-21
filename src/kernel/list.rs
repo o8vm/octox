@@ -20,8 +20,10 @@ impl List {
     }
 
     pub unsafe fn remove(e: *mut List) {
-        (*(*e).prev).next = (*e).next;
-        (*(*e).next).prev = (*e).prev;
+        unsafe {
+            (*(*e).prev).next = (*e).next;
+            (*(*e).next).prev = (*e).prev;
+        }
     }
 
     pub unsafe fn pop(&mut self) -> Option<usize> {
@@ -29,20 +31,25 @@ impl List {
             return None;
         }
         let raw_addr = self.next as usize;
-        Self::remove(self.next);
+        unsafe {
+            // remove the first element
+            Self::remove(self.next);
+        }
         Some(raw_addr)
     }
 
     pub unsafe fn push(&mut self, raw_addr: usize) {
-        let e = raw_addr as *mut List;
-        ptr::write(
-            e,
-            List {
-                prev: self,
-                next: self.next,
-            },
-        );
-        (*self.next).prev = e;
-        self.next = e;
+        unsafe {
+            let e = raw_addr as *mut List;
+            ptr::write(
+                e,
+                List {
+                    prev: self,
+                    next: self.next,
+                },
+            );
+            (*self.next).prev = e;
+            self.next = e;
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::file::{Device, Major, DEVSW};
+use crate::file::{DEVSW, Device, Major};
 use crate::vm::VirtAddr;
 
 pub static NULL: Null = Null;

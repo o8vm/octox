@@ -1,23 +1,40 @@
-use kernel::{defs::*, fs::*, param::*, stat::*};
-use std::{env, io};
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
-use std::path::Path;
-use std::process;
+#![cfg_attr(target_os = "none", no_std)]
+#![cfg_attr(target_os = "none", no_main)]
 
+// This is a host tool that needs std
+#[cfg(not(target_os = "none"))]
+use kernel::{defs::*, fs::*, param::*, stat::*};
+#[cfg(not(target_os = "none"))]
+use std::fs::{File, OpenOptions};
+#[cfg(not(target_os = "none"))]
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+#[cfg(not(target_os = "none"))]
+use std::path::Path;
+#[cfg(not(target_os = "none"))]
+use std::process;
+#[cfg(not(target_os = "none"))]
+use std::{env, io};
+
+#[cfg(not(target_os = "none"))]
 const NINODES: usize = 200;
 
 // Disk layout:
 // [ boot block | sb block | log | inode blocks | free bit map | data blocks ]
-
+#[cfg(not(target_os = "none"))]
 const NBITMAP: usize = FSSIZE / (BSIZE * 8) + 1;
+#[cfg(not(target_os = "none"))]
 const NINODEBLOCKS: usize = NINODES / IPB + 1;
+#[cfg(not(target_os = "none"))]
 const NLOG: usize = LOGSIZE;
+#[cfg(not(target_os = "none"))]
 const NMETA: usize = 2 + NLOG + NINODEBLOCKS + NBITMAP;
+#[cfg(not(target_os = "none"))]
 const NBLOCKS: usize = FSSIZE - NMETA;
 
+#[cfg(not(target_os = "none"))]
 static ZEROS: [u8; BSIZE] = [0; BSIZE];
 
+#[cfg(not(target_os = "none"))]
 struct FsImg {
     sb: SuperBlock,
     img: File,
@@ -25,6 +42,7 @@ struct FsImg {
     freeblock: usize,
 }
 
+#[cfg(not(target_os = "none"))]
 impl FsImg {
     fn new<P: AsRef<Path>>(sb: SuperBlock, path: P) -> Result<Self, std::io::Error> {
         Ok(Self {
@@ -212,6 +230,7 @@ impl FsImg {
     }
 }
 
+#[cfg(not(target_os = "none"))]
 fn main() -> std::io::Result<()> {
     let mut buf = [0u8; BSIZE];
 
@@ -301,13 +320,18 @@ fn main() -> std::io::Result<()> {
             .unwrap()
             .trim_start_matches("_");
         assert!(shortname.len() < 14);
-        let parent_ino = path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).map(|parent_name| match parent_name {
-            "bin" if shortname.contains("init") => rootino,
-            "bin" => binino,
-            "lib" => libino,
-            "etc" => etcino,
-            _ => rootino,
-        }).unwrap_or(rootino);
+        let parent_ino = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|parent_name| match parent_name {
+                "bin" if shortname.contains("init") => rootino,
+                "bin" => binino,
+                "lib" => libino,
+                "etc" => etcino,
+                _ => rootino,
+            })
+            .unwrap_or(rootino);
 
         let mut fd = File::open(path)?;
 
@@ -337,12 +361,14 @@ fn main() -> std::io::Result<()> {
     fsimg.balloc(fsimg.freeblock)
 }
 
+#[cfg(not(target_os = "none"))]
 fn die(str: &str) -> ! {
     println!("{}", str);
     std::process::exit(1);
 }
 
 // On-disk inode structure for mkfs
+#[cfg(not(target_os = "none"))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 struct DInode {
@@ -354,10 +380,12 @@ struct DInode {
     addrs: [u32; NDIRECT + 2], // Data block address
 }
 
+#[cfg(not(target_os = "none"))]
 fn mkfs_as_bytes<T: ?Sized>(refs: &T) -> &[u8] {
     unsafe { as_bytes(refs) }
 }
 
+#[cfg(not(target_os = "none"))]
 fn mkfs_as_bytes_mut<T: ?Sized>(refs: &mut T) -> &mut [u8] {
     unsafe { as_bytes_mut(refs) }
 }

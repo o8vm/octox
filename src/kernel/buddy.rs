@@ -331,20 +331,32 @@ impl BuddyAllocator {
         );
 
         // allocate self.sizes array
-        self.sizes.replace(init_nonnull_slice(&mut p, self.nsize));
+        self.sizes
+            .replace(unsafe { init_nonnull_slice(&mut p, self.nsize) });
 
         // initialize free list and allocate the alloc array for each size k
-        for (k, szinfo) in self.sizes.unwrap().as_mut().iter_mut().enumerate() {
+        for (k, szinfo) in unsafe { self.sizes.unwrap().as_mut() }
+            .iter_mut()
+            .enumerate()
+        {
             szinfo.free.init();
             let sz = round_up(self.nblk(k), 8) / 8;
-            szinfo.alloc.replace(init_nonnull_slice(&mut p, sz));
+            szinfo
+                .alloc
+                .replace(unsafe { init_nonnull_slice(&mut p, sz) });
         }
 
         // allocate the split array for each size k, except for k = 0, since
         // we will not split blocks of size k = 0, the smallest size.
-        for (k, szinfo) in self.sizes.unwrap().as_mut().iter_mut().enumerate().skip(1) {
+        for (k, szinfo) in unsafe { self.sizes.unwrap().as_mut() }
+            .iter_mut()
+            .enumerate()
+            .skip(1)
+        {
             let sz = round_up(self.nblk(k), 8) / 8;
-            szinfo.split.replace(init_nonnull_slice(&mut p, sz));
+            szinfo
+                .split
+                .replace(unsafe { init_nonnull_slice(&mut p, sz) });
         }
 
         // p address my not be aligned now
@@ -375,7 +387,9 @@ impl BuddyAllocator {
 unsafe fn init_nonnull_slice<T>(p: &mut usize, len: usize) -> NonNull<[T]> {
     let nonnull_ptr = NonNull::new(*p as *mut T).unwrap();
     *p += core::mem::size_of::<T>() * len;
-    ptr::write_bytes(nonnull_ptr.as_ptr(), 0, len);
+    unsafe {
+        ptr::write_bytes(nonnull_ptr.as_ptr(), 0, len);
+    }
     NonNull::slice_from_raw_parts(nonnull_ptr, len)
 }
 

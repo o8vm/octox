@@ -4,7 +4,7 @@ use crate::{
 };
 use core::{
     convert::TryInto,
-    sync::atomic::{fence, Ordering},
+    sync::atomic::{Ordering, fence},
 };
 
 //
@@ -60,7 +60,9 @@ impl VirtioMMIO {
         unsafe { core::ptr::read_volatile((VIRTIO0 + self as usize) as *const u32) }
     }
     unsafe fn write(self, data: u32) {
-        core::ptr::write_volatile((VIRTIO0 + self as usize) as *mut u32, data);
+        unsafe {
+            core::ptr::write_volatile((VIRTIO0 + self as usize) as *mut u32, data);
+        }
     }
 }
 
@@ -269,85 +271,87 @@ impl Disk {
     }
 
     unsafe fn init(&mut self) {
-        let mut status: VirtioStatus = 0;
+        unsafe {
+            let mut status: VirtioStatus = 0;
 
-        if VirtioMMIO::MagicValue.read() != 0x74726976
-            || VirtioMMIO::Version.read() != 2
-            || VirtioMMIO::DeviceId.read() != 2
-            || VirtioMMIO::VenderId.read() != 0x554d4551
-        {
-            panic!("could not find virtio disk");
+            if VirtioMMIO::MagicValue.read() != 0x74726976
+                || VirtioMMIO::Version.read() != 2
+                || VirtioMMIO::DeviceId.read() != 2
+                || VirtioMMIO::VenderId.read() != 0x554d4551
+            {
+                panic!("could not find virtio disk");
+            }
+
+            // reset device
+            VirtioMMIO::Status.write(status);
+
+            // set ACKNOWLEDGE status bit
+            status |= virtio_status::ACKNOWLEDGE;
+            VirtioMMIO::Status.write(status);
+
+            // set DRIVER status bit
+            status |= virtio_status::DRIVER;
+            VirtioMMIO::Status.write(status);
+
+            // negotiate features
+            let mut features = VirtioMMIO::DeviceFeatures.read();
+            features &= !(virtio_features::BLK_F_RO);
+            features &= !(virtio_features::BLK_F_SCSI);
+            features &= !(virtio_features::BLK_F_CONFIG_WCE);
+            features &= !(virtio_features::BLK_F_MQ);
+            features &= !(virtio_features::F_ANY_LAYOUT);
+            features &= !(virtio_features::RING_F_EVENT_IDX);
+            features &= !(virtio_features::RING_F_INDIRECT_DESC);
+            VirtioMMIO::DriverFeatures.write(features);
+
+            // tell device that feature negotiation is complete.
+            status |= virtio_status::FEATURES_OK;
+            VirtioMMIO::Status.write(status);
+
+            // re-read status to ensure FEATURES_OK is set.
+            status = VirtioMMIO::Status.read();
+            assert!(
+                status & virtio_status::FEATURES_OK != 0,
+                "virtio disk FEATURES_OK unset"
+            );
+
+            // initialize queue 0.
+            VirtioMMIO::QueueSel.write(0);
+
+            // ensure queue 0 is not in use
+            assert!(
+                VirtioMMIO::QueueReady.read() == 0,
+                "virtio disk shoud not be ready"
+            );
+
+            // check maximum queue size.
+            let max = VirtioMMIO::QueueNumMax.read();
+            assert!(max != 0, "virtio disk has no queue 0");
+            assert!(max >= NUM as u32, "virtio disk max queue too short");
+
+            // set queue size.
+            VirtioMMIO::QueueNum.write(NUM as _);
+
+            // write physical addresses.
+            VirtioMMIO::QueueDescLow.write(&self.desc as *const _ as u64 as u32);
+            VirtioMMIO::QueueDescHigh.write((&self.desc as *const _ as u64 >> 32) as u32);
+            VirtioMMIO::DriverDescLow.write(&self.avail as *const _ as u64 as u32);
+            VirtioMMIO::DriverDescHigh.write((&self.avail as *const _ as u64 >> 32) as u32);
+            VirtioMMIO::DeviceDescLow.write(&self.used as *const _ as u64 as u32);
+            VirtioMMIO::DeviceDescHigh.write((&self.used as *const _ as u64 >> 32) as u32);
+
+            // queue is ready.
+            VirtioMMIO::QueueReady.write(0x1);
+
+            // all NUM descriptors start out unused.
+            self.free.iter_mut().for_each(|f| *f = true);
+
+            // tell device we're completely ready.
+            status |= virtio_status::DRIVER_OK;
+            VirtioMMIO::Status.write(status);
+
+            // plic.rs and trap.rs arrange for interrupts from VIRTIO0_IRQ.
         }
-
-        // reset device
-        VirtioMMIO::Status.write(status);
-
-        // set ACKNOWLEDGE status bit
-        status |= virtio_status::ACKNOWLEDGE;
-        VirtioMMIO::Status.write(status);
-
-        // set DRIVER status bit
-        status |= virtio_status::DRIVER;
-        VirtioMMIO::Status.write(status);
-
-        // negotiate features
-        let mut features = VirtioMMIO::DeviceFeatures.read();
-        features &= !(virtio_features::BLK_F_RO);
-        features &= !(virtio_features::BLK_F_SCSI);
-        features &= !(virtio_features::BLK_F_CONFIG_WCE);
-        features &= !(virtio_features::BLK_F_MQ);
-        features &= !(virtio_features::F_ANY_LAYOUT);
-        features &= !(virtio_features::RING_F_EVENT_IDX);
-        features &= !(virtio_features::RING_F_INDIRECT_DESC);
-        VirtioMMIO::DriverFeatures.write(features);
-
-        // tell device that feature negotiation is complete.
-        status |= virtio_status::FEATURES_OK;
-        VirtioMMIO::Status.write(status);
-
-        // re-read status to ensure FEATURES_OK is set.
-        status = VirtioMMIO::Status.read();
-        assert!(
-            status & virtio_status::FEATURES_OK != 0,
-            "virtio disk FEATURES_OK unset"
-        );
-
-        // initialize queue 0.
-        VirtioMMIO::QueueSel.write(0);
-
-        // ensure queue 0 is not in use
-        assert!(
-            VirtioMMIO::QueueReady.read() == 0,
-            "virtio disk shoud not be ready"
-        );
-
-        // check maximum queue size.
-        let max = VirtioMMIO::QueueNumMax.read();
-        assert!(max != 0, "virtio disk has no queue 0");
-        assert!(max >= NUM as u32, "virtio disk max queue too short");
-
-        // set queue size.
-        VirtioMMIO::QueueNum.write(NUM as _);
-
-        // write physical addresses.
-        VirtioMMIO::QueueDescLow.write(&self.desc as *const _ as u64 as u32);
-        VirtioMMIO::QueueDescHigh.write((&self.desc as *const _ as u64 >> 32) as u32);
-        VirtioMMIO::DriverDescLow.write(&self.avail as *const _ as u64 as u32);
-        VirtioMMIO::DriverDescHigh.write((&self.avail as *const _ as u64 >> 32) as u32);
-        VirtioMMIO::DeviceDescLow.write(&self.used as *const _ as u64 as u32);
-        VirtioMMIO::DeviceDescHigh.write((&self.used as *const _ as u64 >> 32) as u32);
-
-        // queue is ready.
-        VirtioMMIO::QueueReady.write(0x1);
-
-        // all NUM descriptors start out unused.
-        self.free.iter_mut().for_each(|f| *f = true);
-
-        // tell device we're completely ready.
-        status |= virtio_status::DRIVER_OK;
-        VirtioMMIO::Status.write(status);
-
-        // plic.rs and trap.rs arrange for interrupts from VIRTIO0_IRQ.
     }
 
     // find a free descriptor, mark it non-free, return its index.

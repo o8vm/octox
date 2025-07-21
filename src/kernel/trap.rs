@@ -118,49 +118,51 @@ pub extern "C" fn usertrap() -> ! {
 //
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn usertrap_ret() -> ! {
-    let p = Cpus::myproc().unwrap();
+    unsafe {
+        let p = Cpus::myproc().unwrap();
 
-    // we're about to switch the destination of traps from
-    // kerneltrap() to usertrap(), so turn off interrupts until
-    // we're back in user space, where usertrap() is correct.
-    intr_off();
+        // we're about to switch the destination of traps from
+        // kerneltrap() to usertrap(), so turn off interrupts until
+        // we're back in user space, where usertrap() is correct.
+        intr_off();
 
-    // send syscalls, interrupts, and exceptions to trampoline.rs
-    stvec::write(
-        TRAMPOLINE + (uservec as usize - trampoline as usize),
-        stvec::TrapMode::Direct,
-    );
+        // send syscalls, interrupts, and exceptions to trampoline.rs
+        stvec::write(
+            TRAMPOLINE + (uservec as usize - trampoline as usize),
+            stvec::TrapMode::Direct,
+        );
 
-    let data = p.data_mut(); //&mut *p.data.get();
+        let data = p.data_mut(); //&mut *p.data.get();
 
-    // set up trapframe values that uservec will need when
-    // the process next re-enters the kernel.
-    let tf = data.trapframe.as_mut().unwrap();
-    tf.kernel_satp = satp::read().bits();
-    tf.kernel_sp = data.kstack.into_usize() + PGSIZE * STACK_PAGE_NUM;
-    tf.kernel_trap = usertrap as usize;
-    tf.kernel_hartid = Cpus::cpu_id();
+        // set up trapframe values that uservec will need when
+        // the process next re-enters the kernel.
+        let tf = data.trapframe.as_mut().unwrap();
+        tf.kernel_satp = satp::read().bits();
+        tf.kernel_sp = data.kstack.into_usize() + PGSIZE * STACK_PAGE_NUM;
+        tf.kernel_trap = usertrap as usize;
+        tf.kernel_hartid = Cpus::cpu_id();
 
-    // set up the registers that trampoline.rs's sret will use
-    // to get to user space.
+        // set up the registers that trampoline.rs's sret will use
+        // to get to user space.
 
-    // set S Previous Priviledge mode to User.
-    sstatus::set_spp(sstatus::SPP::User); // clear SPP to 0 for user mode.
-    sstatus::set_spie(); // enable interrupts in user mode.
+        // set S Previous Priviledge mode to User.
+        sstatus::set_spp(sstatus::SPP::User); // clear SPP to 0 for user mode.
+        sstatus::set_spie(); // enable interrupts in user mode.
 
-    // set S Exception Program Counter Counter to the saved user pc.
-    sepc::write(tf.epc);
+        // set S Exception Program Counter Counter to the saved user pc.
+        sepc::write(tf.epc);
 
-    // tell trampoline.rs the user page table to switch to.
-    let satp = data.uvm.as_ref().unwrap().as_satp();
+        // tell trampoline.rs the user page table to switch to.
+        let satp = data.uvm.as_ref().unwrap().as_satp();
 
-    // jump to trampoline.rs at the top of memory, witch
-    // switches to the user page table, restores user registers,
-    // and switches to user mode with sret.
+        // jump to trampoline.rs at the top of memory, witch
+        // switches to the user page table, restores user registers,
+        // and switches to user mode with sret.
 
-    let fn_0: usize = TRAMPOLINE + (userret as usize - trampoline as usize);
-    let fn_0: extern "C" fn(usize) -> ! = core::mem::transmute(fn_0);
-    fn_0(satp)
+        let fn_0: usize = TRAMPOLINE + (userret as usize - trampoline as usize);
+        let fn_0: extern "C" fn(usize) -> ! = core::mem::transmute(fn_0);
+        fn_0(satp)
+    }
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,

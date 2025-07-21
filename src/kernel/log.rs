@@ -1,5 +1,5 @@
 use crate::{
-    bio::{BufGuard, BCACHE},
+    bio::{BCACHE, BufGuard},
     fs::{BSIZE, SB},
     param::{LOGSIZE, MAXOPBLOCKS, ROOTDEV},
     proc,

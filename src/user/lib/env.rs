@@ -92,7 +92,7 @@ pub fn set_var(key: &str, value: &str) -> sys::Result<()> {
                         key_val.replace(new_key_value);
                         return Ok(());
                     }
-                    Some(_) => {},
+                    Some(_) => {}
                     None => {
                         key_val.replace(new_key_value);
                         return Ok(());
@@ -113,7 +113,7 @@ pub fn remove_var(key: &str) -> sys::Result<()> {
                         key_val.take();
                         return Ok(());
                     }
-                    Some(_) | None => {},
+                    Some(_) | None => {}
                 }
             }
         }

@@ -8,8 +8,8 @@
 //   control-p -- print process list
 
 use crate::error::{Error::*, Result};
-use crate::file::{Device, Major, DEVSW};
-use crate::proc::{dump, either_copyin, either_copyout, sleep, wakeup, Cpus};
+use crate::file::{DEVSW, Device, Major};
+use crate::proc::{Cpus, dump, either_copyin, either_copyout, sleep, wakeup};
 use crate::spinlock::Mutex;
 use crate::uart;
 use crate::vm::VirtAddr;

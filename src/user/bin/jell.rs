@@ -834,7 +834,7 @@ impl Evaluator {
                                 _ => {
                                     return Err(Error::RuntimeError(
                                         "let binding only takes pairs of symbol and value".into(),
-                                    ))
+                                    ));
                                 }
                             }
                         }
@@ -879,7 +879,7 @@ impl Evaluator {
                             _ => {
                                 return Err(Error::RuntimeError(
                                     "fn takes vector of symbols".into(),
-                                ))
+                                ));
                             }
                         }
                     }
@@ -911,7 +911,7 @@ impl Evaluator {
                     _ => {
                         return Err(Error::RuntimeError(
                             "types not supported for comparison".into(),
-                        ))
+                        ));
                     }
                 };
                 if !ok {
@@ -940,7 +940,7 @@ impl Evaluator {
                     _ => {
                         return Err(Error::RuntimeError(
                             "types not supported for comparison".into(),
-                        ))
+                        ));
                     }
                 };
                 if !ok {
@@ -973,7 +973,7 @@ impl Evaluator {
                     _ => {
                         return Err(Error::RuntimeError(
                             "types not supported for comparison".into(),
-                        ))
+                        ));
                     }
                 };
                 if !ok {
@@ -1006,7 +1006,7 @@ impl Evaluator {
                     _ => {
                         return Err(Error::RuntimeError(
                             "types not supported for comparison".into(),
-                        ))
+                        ));
                     }
                 };
                 if !ok {

@@ -1,5 +1,5 @@
 use crate::{
-    proc::{sleep, wakeup, Cpus},
+    proc::{Cpus, sleep, wakeup},
     spinlock::Mutex,
 };
 use core::{

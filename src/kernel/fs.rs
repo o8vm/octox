@@ -10,7 +10,7 @@ use crate::log::LOG;
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use crate::param::{NINODE, ROOTDEV};
 #[cfg(all(target_os = "none", feature = "kernel"))]
-use crate::proc::{either_copyin, either_copyout, Cpus};
+use crate::proc::{Cpus, either_copyin, either_copyout};
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use crate::sleeplock::{SleepLock, SleepLockGuard};
 #[cfg(all(target_os = "none", feature = "kernel"))]
@@ -659,7 +659,7 @@ impl MInode {
 
     // Lock the inode
     // Reads the inode from disk if necessary.
-    pub fn lock(&self) -> SleepLockGuard<IData> {
+    pub fn lock(&self) -> SleepLockGuard<'_, IData> {
         let sb = SB.get().unwrap();
         let mut guard = self.data.lock();
         if !guard.valid {

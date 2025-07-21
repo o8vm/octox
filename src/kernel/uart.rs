@@ -5,8 +5,8 @@ use crate::{
     proc::{self, Cpus},
     spinlock::Mutex,
 };
-use core::{num::Wrapping, ptr, sync::atomic::Ordering};
 use Register::*;
+use core::{num::Wrapping, ptr, sync::atomic::Ordering};
 
 #[allow(clippy::identity_op)]
 const LCR_EIGHT_BITS: u8 = 3 << 0;
@@ -177,7 +177,9 @@ impl Mutex<Uart> {
 }
 
 pub(crate) unsafe fn init() {
-    UART.get_mut().init();
+    unsafe {
+        UART.get_mut().init();
+    }
 }
 
 // alternate version of putc that doesn't

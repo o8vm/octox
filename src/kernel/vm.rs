@@ -196,7 +196,7 @@ impl AddAssign<usize> for VirtAddr {
 pub unsafe trait PageAllocator: Sized {
     unsafe fn try_new_zeroed() -> Option<*mut Self> {
         match Box::<Self>::try_new_zeroed() {
-            Ok(mem) => Some(Box::into_raw(mem.assume_init())),
+            Ok(mem) => unsafe { Some(Box::into_raw(mem.assume_init())) },
             Err(_) => None,
         }
     }
@@ -690,7 +690,9 @@ impl Kvm {
         );
 
         // map kernel stacks
-        PROCS.mapstacks();
+        unsafe {
+            PROCS.mapstacks();
+        }
     }
 }
 

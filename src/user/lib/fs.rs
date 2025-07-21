@@ -5,12 +5,12 @@ use crate::io::{Read, Write};
 use crate::path::{Path, PathBuf};
 use crate::sys::{
     self,
+    Error::*,
     defs::AsBytes,
-    fcntl::{omode, FcntlCmd},
+    fcntl::{FcntlCmd, omode},
     fs::DirEnt,
     stat::FileType,
     stat::Stat,
-    Error::*,
 };
 pub type Fd = usize;
 
