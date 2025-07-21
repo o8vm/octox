@@ -15,7 +15,7 @@
 #![allow(dead_code)]
 
 extern crate alloc;
-use derive::{SyscallError, Syscalls};
+use derive::{SysErrs, SysCalls};
 
 use core::alloc::{GlobalAlloc, Layout};
 // Import common types that might be used by generated code
@@ -45,7 +45,7 @@ static GLOBAL: DummyAllocator = DummyAllocator;
 /// This enum represents various error conditions that can be returned
 /// by system calls. Each variant has an explicit negative discriminant
 /// value that corresponds to standard Unix error codes.
-#[derive(SyscallError, PartialEq, Debug)]
+#[derive(SysErrs, PartialEq, Debug)]
 #[repr(isize)]
 pub enum Error {
     /// Default/uncategorized error when no specific error code matches
@@ -105,7 +105,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 /// This enum defines a set of system calls with their IDs, parameters,
 /// and return types. The derive macro will generate appropriate wrapper
 /// functions for both userspace and kernel contexts.
-#[derive(Syscalls)]
+#[derive(SysCalls)]
 enum SysCalls {
     /// Read data from a file descriptor into a buffer.
     #[syscall(id = 0, params(fd: Fd, buf: &mut [u8]), ret(Result<usize>))]

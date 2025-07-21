@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```rust
-//! #[derive(Syscalls)]
+//! #[derive(SysCalls)]
 //! enum SysCalls {
 //!     #[syscall(id = 0, params(fd: Fd, buf: &mut [u8]), ret(Result<usize>))]
 //!     Read,
@@ -15,7 +15,7 @@
 //!     Write,
 //! }
 //!
-//! #[derive(SyscallError)]
+//! #[derive(SysErrs)]
 //! #[repr(isize)]
 //! pub enum Error {
 //!     Uncategorized,
@@ -28,7 +28,7 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 
 mod common;
-mod error;
+mod syserr;
 mod syscall;
 
 /// Derives syscall wrapper implementations for both userspace and kernel environments.
@@ -54,7 +54,7 @@ mod syscall;
 ///     Read,
 /// }
 /// ```
-#[proc_macro_derive(Syscalls, attributes(syscall))]
+#[proc_macro_derive(SysCalls, attributes(syscall))]
 pub fn derive_syscalls(input: TokenStream) -> TokenStream {
     syscall::derive_syscalls_impl(input)
 }
@@ -68,7 +68,7 @@ pub fn derive_syscalls(input: TokenStream) -> TokenStream {
 /// # Example
 ///
 /// ```rust
-/// #[derive(SyscallError)]
+/// #[derive(SysErrs)]
 /// #[repr(isize)]
 /// pub enum Error {
 ///     Uncategorized,
@@ -79,8 +79,7 @@ pub fn derive_syscalls(input: TokenStream) -> TokenStream {
 ///
 /// This generates:
 /// - `From<isize>` implementation for error conversion
-/// - `from_isize` convenience method
-#[proc_macro_derive(SyscallError)]
+#[proc_macro_derive(SysErrs)]
 pub fn derive_syscall_error(input: TokenStream) -> TokenStream {
-    error::derive_syscall_error_impl(input)
+    syserr::derive_syscall_error_impl(input)
 }

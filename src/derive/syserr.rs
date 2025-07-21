@@ -25,7 +25,7 @@ use proc_macro::TokenStream;
 /// # Example Input
 ///
 /// ```rust
-/// #[derive(SyscallError)]
+/// #[derive(SysErrs)]
 /// #[repr(isize)]
 /// pub enum Error {
 ///     Uncategorized,
@@ -46,12 +46,6 @@ use proc_macro::TokenStream;
 ///             -4 => Error::OutOfMemory,
 ///             _ => Error::Uncategorized,
 ///         }
-///     }
-/// }
-///
-/// impl Error {
-///     pub fn from_isize(value: isize) -> Self {
-///         Self::from(value)
 ///     }
 /// }
 /// ```
