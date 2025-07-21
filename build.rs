@@ -20,8 +20,8 @@ fn main() {
         .join("fs.img");
     println!("cargo:rerun-if-changed={}", mkfs_path.display());
     println!("cargo:rerun-if-changed={}", uprogs_src_path.display());
-    let readme = Path::new(env!("CARGO_MANIFEST_DIR")).join("README.org");
-    assert!(readme.exists(), "README.org not found");
+    let readme = Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    assert!(readme.exists(), "README.md not found");
     let mut mkfs_cmd = Command::new(&mkfs_path);
     mkfs_cmd.current_dir(&out_dir);
     mkfs_cmd.arg(fs_img).arg(&readme).args(uprogs);
