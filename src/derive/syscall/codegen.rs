@@ -67,15 +67,15 @@ fn emit_trait(registry: &ir::SyscallRegistry) -> TokenStream {
 
         #[cfg(all(target_os = "none", feature = "kernel"))]
         trait SyscallDispatch {
-            fn copyin<T: AsBytes>(dst: &mut T, src: usize) -> Result<(), Error> {
+            fn copyin<T: AsBytes>(dst: &mut T, src: usize) -> Result<()> {
                 unimplemented!("copyin must be implemented by kernel")
-            }
+                }
 
-            fn dispatch(tf: &mut TrapFrame) -> Result<(), Error> {
+            fn dispatch(tf: &mut TrapFrameCore) -> Result<()> {
                 #dispatch_body
             }
 
-            fn copyout<T: AsBytes>(dst: usize, src: &T) -> Result<(), Error> {
+            fn copyout<T: AsBytes>(dst: usize, src: &T) -> Result<()> {
                 unimplemented!("copyout must be implemented by kernel")
             }
 
@@ -489,7 +489,7 @@ fn emit_user_body_generic<A: ArchSpec>(syscall: &ir::Syscall) -> TokenStream {
 ///
 /// # Type Handling
 /// - Value types: Passed directly as usize
-/// - Fd/PId types: Extract inner value (.0) 
+/// - Fd/PId types: Extract inner value (.0)
 /// - References: Passed as pointer addresses
 /// - Slices/Strings: Passed as fat pointer addresses (&name)
 /// - Options: Passed as memory addresses for proper Some(0)/None distinction
@@ -537,7 +537,6 @@ fn emit_register_assignments<A: ArchSpec>(params: &[ir::Param]) -> TokenStream {
                     _ => {
                         // Unsupported Option inner types
                         quote!(compile_error!("Option can contain only ref, slice and value types");)
-
                     }
                 }
             }
@@ -584,7 +583,7 @@ fn emit_dispatch_body(registry: &ir::SyscallRegistry) -> TokenStream {
     }
 
     quote!(
-        let result = match tf.syscall_num as u16 {
+        let result = match tf.syscall_num() as u16 {
             #match_arms
             _ => Err(Error::ENOSYS),
         };

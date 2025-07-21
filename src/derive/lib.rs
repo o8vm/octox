@@ -28,8 +28,8 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 
 mod common;
-mod syserr;
 mod syscall;
+mod syserr;
 
 /// Derives syscall wrapper implementations for both userspace and kernel environments.
 ///

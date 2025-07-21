@@ -82,7 +82,7 @@ fn emit_from_isize_arms(registry: &ir::ErrorRegistry) -> TokenStream {
 
 // Future enhancement: Generate Into<isize> implementation
 // This would allow converting error enum variants back to their isize values
-// 
+//
 // fn emit_into_isize_arms(registry: &ir::ErrorRegistry) -> TokenStream {
 //     let mut arms = TokenStream::new();
 

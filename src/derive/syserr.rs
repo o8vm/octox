@@ -42,7 +42,7 @@ use proc_macro::TokenStream;
 ///     fn from(value: isize) -> Self {
 ///         match value {
 ///             -2 => Error::ResourceBusy,
-///             -3 => Error::NotFound, 
+///             -3 => Error::NotFound,
 ///             -4 => Error::OutOfMemory,
 ///             _ => Error::Uncategorized,
 ///         }
