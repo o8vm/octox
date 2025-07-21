@@ -1,15 +1,34 @@
+//! AST to IR lowering for syscall definitions.
+//!
+//! This module handles the transformation from Abstract Syntax Tree (AST)
+//! representations to Intermediate Representation (IR). It performs semantic
+//! analysis, validates constraints, and prepares the data structures needed
+//! for code generation.
+
 use std::iter::Peekable;
 
 use crate::syscall::constants::MAX_ARG_REGS;
 
-use super::ir;
 use super::ast;
-use super::error::{Error, Result};
+use super::ir;
 use super::parser::parse_generic_arg_iter;
+use crate::common::error::{Error, Result};
 use proc_macro::Ident;
 use proc_macro::Span;
 use proc_macro::TokenTree;
 
+/// Converts an AST enum into an IR syscall registry.
+///
+/// This function performs the main lowering operation, transforming the parsed
+/// AST representation into a structured IR that can be used for code generation.
+/// It validates syscall definitions and builds the registry of all syscalls.
+///
+/// # Arguments
+/// * `ast` - The parsed AST enum containing syscall definitions
+///
+/// # Returns
+/// * `Ok(ir::SyscallRegistry)` - Successfully lowered syscall registry
+/// * `Err(Error)` - Validation or lowering error
 pub fn lower_to_ir(ast: ast::Enum) -> Result<ir::SyscallRegistry> {
     let mut registry = ir::SyscallRegistry::new(ast.name);
 
@@ -21,6 +40,18 @@ pub fn lower_to_ir(ast: ast::Enum) -> Result<ir::SyscallRegistry> {
     Ok(registry)
 }
 
+/// Converts a single AST variant into an IR syscall definition.
+///
+/// This function processes one syscall variant, validating its parameters
+/// and return type while converting them to the appropriate IR types.
+/// It also enforces architecture constraints like maximum argument count.
+///
+/// # Arguments
+/// * `variant` - The AST variant to convert
+///
+/// # Returns
+/// * `Ok(ir::Syscall)` - Successfully converted syscall definition
+/// * `Err(Error)` - Parameter validation or conversion error
 fn lower_variant(variant: ast::Variant) -> Result<ir::Syscall> {
     let id = ir::SyscallId::from(variant.id as u16);
 
@@ -34,13 +65,13 @@ fn lower_variant(variant: ast::Variant) -> Result<ir::Syscall> {
         });
     }
 
-    let reg_count = params.len().min(MAX_ARG_REGS as usize) as u8;
-
     if params.len() > MAX_ARG_REGS as usize {
         return Err(Error::new(
             format!(
                 "too many parameters for syscall '{}': expected at most {} but got {}",
-                variant.name, MAX_ARG_REGS, params.len()
+                variant.name,
+                MAX_ARG_REGS,
+                params.len()
             ),
             Span::call_site(),
         ));
@@ -48,7 +79,10 @@ fn lower_variant(variant: ast::Variant) -> Result<ir::Syscall> {
 
     let ret = lower_return(variant.ret)?;
 
-    let rust_name = Ident::new(&variant.name.to_string().to_lowercase(), variant.name.span());
+    let rust_name = Ident::new(
+        &variant.name.to_string().to_lowercase(),
+        variant.name.span(),
+    );
 
     Ok(ir::Syscall {
         id,
@@ -56,10 +90,21 @@ fn lower_variant(variant: ast::Variant) -> Result<ir::Syscall> {
         rust_name,
         params,
         ret,
-        reg_count,
     })
 }
 
+/// Converts an AST parameter type to its IR representation.
+///
+/// This function performs type analysis and conversion from AST types to
+/// IR types. It handles complex type parsing including references, slices,
+/// optional types, and custom types while validating type constraints.
+///
+/// # Arguments
+/// * `ast_ty` - The AST type to convert
+///
+/// # Returns
+/// * `Ok(ir::Type)` - Successfully converted IR type
+/// * `Err(Error)` - Type conversion or validation error
 fn lower_param_type(ast_ty: &ast::Type) -> Result<ir::Type> {
     let mut tokens = ast_ty.tokens.clone().into_iter().peekable();
     let type_str = ast_ty.tokens.to_string();
@@ -74,26 +119,34 @@ fn lower_param_type(ast_ty: &ast::Type) -> Result<ir::Type> {
             tokens.next();
 
             let is_mut = {
-                let tt = tokens
-                    .peek()
-                    .ok_or_else(|| Error::new("expected 'const' or 'mut' after '*'", ast_ty.span))?;
+                let tt = tokens.peek().ok_or_else(|| {
+                    Error::new("expected 'const' or 'mut' after '*'", ast_ty.span)
+                })?;
 
                 // Destructure into an Ident or bail out
                 let TokenTree::Ident(ident) = tt else {
-                    return Err(Error::new("expected 'const' or 'mut' after '*'", ast_ty.span));
+                    return Err(Error::new(
+                        "expected 'const' or 'mut' after '*'",
+                        ast_ty.span,
+                    ));
                 };
 
                 // Match on the stringified identifier
                 match ident.to_string().as_str() {
-                    "const" => { 
+                    "const" => {
                         tokens.next(); // consume 'const'
-                        false 
-                    },
-                    "mut"   => {
-                        tokens.next();  // consume 'mut'
+                        false
+                    }
+                    "mut" => {
+                        tokens.next(); // consume 'mut'
                         true
-                    },
-                    _ => return Err(Error::new("expected 'const' or 'mut' after '*'", ast_ty.span)),
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            "expected 'const' or 'mut' after '*'",
+                            ast_ty.span,
+                        ));
+                    }
                 }
             };
 
@@ -166,30 +219,60 @@ fn lower_param_type(ast_ty: &ast::Type) -> Result<ir::Type> {
     }
 
     // Handle Option<T>
-    if let Some(TokenTree::Ident(ident)) = tokens.peek() && ident.to_string() == "Option" {
+    if let Some(TokenTree::Ident(ident)) = tokens.peek()
+        && ident.to_string() == "Option"
+    {
         tokens.next(); // consume 'Option'
         if let Some(inner_ast) = parse_generic_arg_iter(&mut tokens)? {
             let inner_type = lower_param_type(&inner_ast)?;
-            return Ok(ir::Type::Option{ inner: Box::new(inner_type)});
+            return Ok(ir::Type::Option {
+                inner: Box::new(inner_type),
+            });
         }
     }
 
-    // その他の型名は、カスタム型として扱う（例：Stat）
-    // AsBytes制約は生成されたコードのコンパイル時にチェックされる
-    // 元のトークンストリームを保持することで型安全性を保つ
+    // Handle custom types (e.g., Stat, File)
+    // Custom types are preserved as token streams for later validation
+    // The AsBytes constraint is checked during compilation of generated code
+    // This preserves type safety while allowing flexible custom type support
     Ok(ir::Type::Custom(ast_ty.tokens.clone()))
 }
 
+/// Converts an AST return type to its IR representation.
+///
+/// This function handles the conversion of return type specifications from
+/// the AST form to the IR form, supporting both never-returning functions
+/// and concrete return types.
+///
+/// # Arguments
+/// * `ret` - The AST return type to convert
+///
+/// # Returns
+/// * `Ok(ir::ReturnType)` - Successfully converted return type
+/// * `Err(Error)` - Return type validation error
 fn lower_return(ret: ast::ReturnType) -> Result<ir::ReturnType> {
-    match ret {        
+    match ret {
         ast::ReturnType::Never => Ok(ir::ReturnType::Never),
-        ast::ReturnType::Type(ast_ty) => lower_return_type(&ast_ty)
+        ast::ReturnType::Type(ast_ty) => lower_return_type(&ast_ty),
     }
 }
 
+/// Converts a concrete AST return type to its IR representation.
+///
+/// This function specifically handles Result types and their inner value types,
+/// validating that the return type follows the expected pattern for syscalls.
+///
+/// # Arguments
+/// * `typ` - The AST type representing the return type
+///
+/// # Returns
+/// * `Ok(ir::ReturnType)` - Successfully converted return type
+/// * `Err(Error)` - Invalid return type format
 fn lower_return_type(typ: &ast::Type) -> Result<ir::ReturnType> {
     let mut tokens = typ.tokens.clone().into_iter().peekable();
-    if let Some(TokenTree::Ident(i)) = tokens.peek() && i.to_string() == "Result" {
+    if let Some(TokenTree::Ident(i)) = tokens.peek()
+        && i.to_string() == "Result"
+    {
         tokens.next(); // consume 'Result'
         lower_result_type(tokens, typ.span)
     } else {
@@ -197,15 +280,45 @@ fn lower_return_type(typ: &ast::Type) -> Result<ir::ReturnType> {
     }
 }
 
-fn lower_result_type(mut tokens: Peekable<impl Iterator<Item = TokenTree>>, span: Span) -> Result<ir::ReturnType> {
-    // ジェネリクス引数を抽出
+/// Converts a Result type to its IR representation.
+///
+/// This function processes the generic arguments of Result types to extract
+/// the success value type and validate the Result format for syscalls.
+///
+/// # Arguments
+/// * `tokens` - Token iterator positioned after 'Result'
+/// * `span` - Source span for error reporting
+///
+/// # Returns
+/// * `Ok(ir::ReturnType)` - Successfully converted Result type
+/// * `Err(Error)` - Invalid Result type format
+fn lower_result_type(
+    mut tokens: Peekable<impl Iterator<Item = TokenTree>>,
+    span: Span,
+) -> Result<ir::ReturnType> {
+    // Extract generic arguments from Result<T, E>
     match parse_generic_arg_iter(&mut tokens) {
         Ok(Some(args)) => lower_result_type_param(&args, span),
-        Ok(None) => Err(Error::new("expected generic arguments for Result type", span)),
+        Ok(None) => Err(Error::new(
+            "expected generic arguments for Result type",
+            span,
+        )),
         Err(e) => Err(e),
     }
 }
 
+/// Processes the type parameters within a Result type.
+///
+/// This function analyzes the generic parameters of Result<T, E> to extract
+/// the success value type while ignoring the error type (assumed to be Error).
+///
+/// # Arguments
+/// * `args` - AST type representing the Result generic arguments
+/// * `span` - Source span for error reporting
+///
+/// # Returns
+/// * `Ok(ir::ReturnType)` - Successfully processed Result parameters
+/// * `Err(Error)` - Invalid parameter format
 fn lower_result_type_param(args: &ast::Type, span: Span) -> Result<ir::ReturnType> {
     let mut tokens = args.tokens.clone().into_iter().peekable();
     let mut first_type_tokens = Vec::new();
@@ -238,27 +351,26 @@ fn lower_result_type_param(args: &ast::Type, span: Span) -> Result<ir::ReturnTyp
         }
     }
 
-    // 二番目の引数がある場合、それが Error 型であることを確認する
-    // has_error_param が true の場合、残りのトークンが "Error" であることを確認する
-    // もし "Error" でなければエラーを返す
-    // false の場合は、 Result<T> として受け入れる
+    // Validate the second type parameter if present
+    // For syscalls, Result<T, E> should always use Error as the error type
+    // Single-parameter Result<T> is also accepted for convenience
     if has_error_param {
-        let remainig: String = tokens
+        let remaining: String = tokens
             .map(|tt| tt.to_string())
             .collect::<Vec<_>>()
             .join("")
             .trim()
             .to_string();
 
-        if remainig != "Error" {
+        if remaining != "Error" {
             return Err(Error::new(
-                format!("expected 'Error' type in Result, found '{}'", remainig),
+                format!("expected 'Error' type in Result, found '{}'", remaining),
                 span,
             ));
         }
     }
 
-    // 最初の型を文字列に変換して評価
+    // Convert the first type parameter to string and analyze it
     let first_type_str = first_type_tokens
         .iter()
         .map(|tt| tt.to_string())

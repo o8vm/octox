@@ -1,9 +1,54 @@
-// =============================================================================
-// Quote macro implementation
-// =============================================================================
+// Macro quotation utilities for code generation.
+//
+// This module provides a `quote!` macro implementation that allows for easy
+// generation of TokenStreams in procedural macros. It supports interpolation
+// of variables and expressions into the generated token stream.
+//
+// # Features
+//
+// - Token interpolation with `#variable` syntax
+// - Expression interpolation with `#(expression)` syntax  
+// - Single token interpolation with `@variable` syntax
+// - Automatic handling of delimiters (braces, brackets, parentheses)
+// - Proper spacing and punctuation handling
+//
+// # Example
+//
+// ```rust
+// let name = Ident::new("MyStruct", Span::call_site());
+// let tokens = quote! {
+//     struct @name {
+//         field: u32,
+//     }
+// };
+// ```
 
 use proc_macro::{TokenStream, TokenTree, Group, Delimiter, Ident, Literal, Punct, Spacing, Span};
 
+/// Main quotation macro for generating TokenStreams.
+///
+/// This macro provides a domain-specific language for constructing TokenStreams
+/// with support for variable interpolation and proper token handling.
+///
+/// # Interpolation Syntax
+///
+/// - `#variable` - Interpolates a TokenStream or collection of tokens
+/// - `#(expression)` - Interpolates the result of an expression
+/// - `@variable` - Interpolates a single token (typically an Ident)
+///
+/// # Examples
+///
+/// ```rust
+/// // Empty token stream
+/// let empty = quote!();
+///
+/// // Simple token sequence
+/// let tokens = quote!(fn hello() {});
+///
+/// // With variable interpolation
+/// let name = Ident::new("test", Span::call_site());
+/// let function = quote!(fn @name() {});
+/// ```
 macro_rules! quote {
     () => { TokenStream::new() };
     ($($tt:tt)*) => {{
@@ -13,6 +58,10 @@ macro_rules! quote {
     }};
 }
 
+/// Internal implementation macro for the quote! macro.
+///
+/// This macro handles the recursive processing of tokens and interpolation
+/// syntax, building up the final TokenStream through pattern matching.
 macro_rules! quote_impl {
     // Base case
     ($stream:ident,) => {};

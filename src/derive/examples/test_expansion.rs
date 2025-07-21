@@ -1,0 +1,196 @@
+//! Test file demonstrating syscall derive macro expansion.
+//!
+//! This file serves as a test case and example for the derive macros
+//! provided by this crate. It shows how to use both the `Syscalls` and
+//! `SyscallError` derive macros to generate syscall wrappers and error
+//! handling code.
+//!
+//! # Usage
+//!
+//! This file can be used to test macro expansion during development
+//! and serves as documentation for the expected macro usage patterns.
+
+#![no_std]
+#![no_main]
+#![allow(dead_code)]
+
+extern crate alloc;
+use derive::{SyscallError, Syscalls};
+
+use core::alloc::{GlobalAlloc, Layout};
+// Import common types that might be used by generated code
+#[allow(unused_imports)]
+use alloc::{vec, vec::Vec, string::String, boxed::Box, collections::BTreeMap};
+
+/// Dummy global allocator for no_std environment.
+/// This is a minimal allocator that just panics on allocation attempts.
+/// In a real implementation, you would use a proper allocator.
+struct DummyAllocator;
+
+unsafe impl GlobalAlloc for DummyAllocator {
+    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
+        panic!("Allocation not supported in this test environment");
+    }
+
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+        panic!("Deallocation not supported in this test environment");
+    }
+}
+
+#[global_allocator]
+static GLOBAL: DummyAllocator = DummyAllocator;
+
+/// Test error enum demonstrating SyscallError derive macro usage.
+///
+/// This enum represents various error conditions that can be returned
+/// by system calls. Each variant has an explicit negative discriminant
+/// value that corresponds to standard Unix error codes.
+#[derive(SyscallError, PartialEq, Debug)]
+#[repr(isize)]
+pub enum Error {
+    /// Default/uncategorized error when no specific error code matches
+    Uncategorized,
+    /// Resource is currently busy or locked
+    ResourceBusy = -2,
+    /// Requested resource or file not found  
+    NotFound = -3,
+    /// System is out of memory
+    OutOfMemory = -4,
+    /// Invalid virtual address provided
+    BadVirtAddr = -5,
+    /// Invalid argument passed to syscall
+    InvalidArgument = -23,
+    /// System call not implemented
+    ENOSYS = -38,
+}
+
+/// File descriptor wrapper type for type safety.
+///
+/// Wraps a raw usize file descriptor value to provide type safety
+/// and prevent accidental misuse of file descriptor values.
+#[derive(Debug, Clone, Copy)]
+pub struct Fd(pub usize);
+
+/// Process ID wrapper type for type safety.
+///
+/// Wraps a raw usize process ID value to provide type safety
+/// and prevent accidental confusion with other numeric types.
+#[derive(Debug, Clone, Copy)]
+pub struct PId(pub usize);
+
+/// File statistics structure for file metadata.
+///
+/// Contains standard file metadata fields that can be populated
+/// by file stat system calls.
+#[derive(Debug, Default)]
+pub struct Stat {
+    /// Device ID containing the file
+    pub dev: u64,
+    /// Inode number of the file
+    pub ino: u64,
+    /// Number of hard links to the file
+    pub nlink: u64,
+    /// Size of the file in bytes
+    pub size: u64,
+}
+
+/// Result type alias for syscall operations.
+///
+/// Provides a convenient Result type that uses our Error enum
+/// for representing syscall failures.
+pub type Result<T> = core::result::Result<T, Error>;
+
+/// Test syscalls enum demonstrating Syscalls derive macro usage.
+///
+/// This enum defines a set of system calls with their IDs, parameters,
+/// and return types. The derive macro will generate appropriate wrapper
+/// functions for both userspace and kernel contexts.
+#[derive(Syscalls)]
+enum SysCalls {
+    /// Read data from a file descriptor into a buffer.
+    #[syscall(id = 0, params(fd: Fd, buf: &mut [u8]), ret(Result<usize>))]
+    Read,
+    /// Write data from a buffer to a file descriptor.
+    #[syscall(id = 1, params(fd: Fd, buf: &[u8]), ret(Result<usize>))]
+    Write,
+    /// Open a file with specified flags and return a file descriptor.
+    #[syscall(id = 2, params(path: &str, flags: usize), ret(Result<Fd>))]
+    Open,
+    /// Execute a program with given arguments and environment.
+    #[syscall(id = 3, params(filename: &str, argv: &[&str], envp: Option<&[Option<&str>]>), ret(Result<()>))]
+    Exec,
+    /// Fork the current process and return the new process ID.
+    #[syscall(id = 4, params(), ret(Result<PId>))]
+    Fork,
+    /// Get file statistics for a file descriptor.
+    #[syscall(id = 5, params(fd: Fd, st: &mut Stat), ret(Result<usize>))]
+    Fstat,
+    /// Invalid syscall variant for testing purposes.
+    Invalid,
+}
+
+/// Marker trait for types that can be safely converted to/from byte arrays.
+///
+/// This trait is used by the kernel dispatch logic to handle copying data
+/// between userspace and kernel space. Types implementing this trait can
+/// be safely reinterpreted as byte sequences.
+pub trait AsBytes {}
+
+/// AsBytes implementation for single bytes.
+impl AsBytes for u8 {}
+
+/// AsBytes implementation for byte slices.
+impl AsBytes for [u8] {}
+
+/// AsBytes implementation for file statistics structure.
+impl AsBytes for Stat {}
+
+/// Kernel trap frame structure for syscall handling.
+///
+/// This structure represents the CPU state when a system call trap occurs.
+/// It provides access to syscall numbers, arguments, and return value storage.
+pub struct TrapFrame {
+    /// Core trap frame functionality
+    pub core: TrapFrameCore,
+}
+
+impl TrapFrame {
+    /// Gets the syscall number from the trap frame.
+    ///
+    /// # Returns
+    /// The syscall number that was invoked
+    pub fn syscall_num(&self) -> usize {
+        self.core.syscall_num()
+    }
+
+    /// Gets a syscall argument by index.
+    ///
+    /// # Arguments
+    /// * `n` - The argument index (0-based)
+    ///
+    /// # Returns
+    /// The value of the nth syscall argument
+    pub fn arg(&self, n: usize) -> usize {
+        self.core.arg(n)
+    }
+
+    /// Sets the syscall return value in the trap frame.
+    ///
+    /// # Arguments
+    /// * `val` - The return value to store
+    pub fn set_return(&mut self, val: usize) {
+        self.core.set_return(val)
+    }
+}
+
+/// Panic handler required for no_std environments.
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+
+/// Entry point for no_main environments.
+#[unsafe(no_mangle)]
+pub extern "C" fn _start() -> ! {
+    loop {}
+}

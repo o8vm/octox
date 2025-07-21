@@ -1,25 +1,35 @@
-use proc_macro::Ident;
+//! Intermediate Representation (IR) for syscall code generation.
+//!
+//! This module defines the intermediate representation used between the parsing
+//! and code generation phases. It includes architecture specifications, type
+//! definitions, and data structures that represent syscalls in a form suitable
+//! for generating target code.
+
 use core::fmt;
+use proc_macro::Ident;
 use std::str::FromStr;
 
-
-
-/// Architecture-specific syscall specifications
-/// 
-/// This trait defines the register layout and instruction format
-/// for making system calls on different CPU architectures.
+/// Architecture-specific syscall specifications.
+///
+/// This trait defines the register layout and instruction format for making
+/// system calls on different CPU architectures. It abstracts away architecture
+/// differences to enable cross-platform syscall generation.
 pub trait ArchSpec {
-    /// Registers used for passing syscall arguments
+    /// CPU registers used for passing syscall arguments in order
     const IN_REGS: &'static [&'static str];
-    /// Register used for syscall return value
+    /// CPU register that receives the syscall return value
     const OUT_REGS: &'static str;
-    /// Register used for syscall number
+    /// CPU register used to pass the syscall number to the kernel
     const SYSCALL_REGS: &'static str;
-    /// Assembly instruction used to invoke syscalls
+    /// Assembly instruction used to invoke system calls
     const INSN: &'static str;
 }
 
-/// ARM64/AArch64 architecture specification
+/// ARM64/AArch64 architecture specification.
+///
+/// Implements the ARM64 system call ABI with appropriate register assignments
+/// and the SVC (Supervisor Call) instruction for entering kernel mode.
+#[allow(dead_code)]
 pub struct Aarch64;
 
 impl ArchSpec for Aarch64 {
@@ -29,7 +39,11 @@ impl ArchSpec for Aarch64 {
     const INSN: &'static str = "svc 0";
 }
 
-/// RISC-V 64-bit architecture specification
+/// RISC-V 64-bit architecture specification.
+///
+/// Implements the RISC-V system call ABI using the standard argument registers
+/// and the ECALL (Environment Call) instruction for system calls.
+#[allow(dead_code)]
 pub struct RiscV64;
 
 impl ArchSpec for RiscV64 {
@@ -39,13 +53,14 @@ impl ArchSpec for RiscV64 {
     const INSN: &'static str = "ecall";
 }
 
-
 // === IR Types ===
 
-/// Unique identifier for a system call
-/// 
-/// This type wraps a u16 value that represents the syscall number
-/// used by the kernel to identify which system call to execute.
+/// Unique identifier for a system call.
+///
+/// This type wraps a u16 value that represents the syscall number used by the
+/// kernel to identify which system call to execute. The use of u16 provides
+/// a reasonable range (0-65535) for syscall numbers while keeping the
+/// representation compact.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SyscallId(pub u16);
@@ -57,7 +72,7 @@ impl From<u16> for SyscallId {
 }
 
 /// Type representation for syscall parameters and return values
-/// 
+///
 /// This enum represents all possible types that can be used in syscall
 /// definitions, including primitive values, pointers, references, slices,
 /// strings, and optional types.
@@ -81,7 +96,7 @@ pub enum Type {
 }
 
 /// Primitive value types supported in syscall definitions
-/// 
+///
 /// This enum represents all the primitive types that can be passed as
 /// syscall parameters or returned from syscalls. It includes standard
 /// Rust primitive types as well as kernel-specific types like file
@@ -120,12 +135,10 @@ pub enum ValueType {
     Fd,
     /// Process ID (kernel-specific type)
     PId,
-    /// Custom type (e.g., Stat, any type implementing AsBytes)
-    Custom(String),
 }
 
 /// Display implementation for ValueType
-/// 
+///
 /// Converts each ValueType variant to its corresponding Rust type name string.
 /// This is useful for code generation and error messages.
 impl fmt::Display for ValueType {
@@ -147,14 +160,13 @@ impl fmt::Display for ValueType {
             ValueType::Char => "char",
             ValueType::Fd => "Fd",
             ValueType::PId => "PId",
-            ValueType::Custom(s) => return write!(f, "{}", s),
         };
         write!(f, "{}", name)
     }
 }
 
 /// FromStr implementation for ValueType
-/// 
+///
 /// Parses a string representation of a type name into the corresponding
 /// ValueType variant. This is used during macro parsing to convert
 /// type names from the input token stream.
@@ -183,12 +195,10 @@ impl FromStr for ValueType {
     }
 }
 
-
-
 // === IR Structures ===
 
 /// Registry containing all syscalls for a particular syscall enum
-/// 
+///
 /// This is the main container for syscall definitions after they've been
 /// parsed from the AST and converted to an intermediate representation.
 #[derive(Debug, Clone)]
@@ -215,7 +225,7 @@ impl SyscallRegistry {
 }
 
 /// Individual syscall definition in intermediate representation
-/// 
+///
 /// Contains all information needed to generate syscall wrapper functions,
 /// including parameter types, return types, and register allocation details.
 #[derive(Debug, Clone)]
@@ -230,14 +240,12 @@ pub struct Syscall {
     pub params: Vec<Param>,
     /// Return type specification
     pub ret: ReturnType,
-    /// Number of registers needed for this syscall
-    pub reg_count: u8,
 }
 
 // === Parameters and Return Type ===
 
 /// A single parameter for a syscall
-/// 
+///
 /// Represents both the name and type information for parameters
 /// that will be passed to the generated syscall function.
 #[derive(Debug, Clone)]
@@ -249,7 +257,7 @@ pub struct Param {
 }
 
 /// Return type specification for syscalls
-/// 
+///
 /// Defines the possible return types that syscalls can have,
 /// including success values, errors, and never-returning calls.
 #[derive(Debug, Clone)]
@@ -258,35 +266,4 @@ pub enum ReturnType {
     Never,
     /// Returns a Result type, optionally wrapping a value type
     Result(Option<ValueType>),
-}
-
-
-#[repr(C)]
-pub struct TrapFrame {
-    pub regs: [usize; 31], // General-purpose registers
-    pub sp: usize,         // Stack pointer
-    pub pc: usize,         // Program counter
-    pub syscall_id: usize,
-}
-
-impl TrapFrame {
-    #[cfg(target_arch = "aarch64")]
-    pub fn arg(&self, index: usize) -> usize {
-        self.regs[index] // x0 to x5
-    }
-
-    #[cfg(target_arch = "riscv64")]
-    pub fn arg(&self, index: usize) -> usize {
-        self.regs[index + 10] // a0 to a5
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    pub fn set_return(&mut self, value: usize) {
-        self.regs[0] = value; // x0
-    }
-
-    #[cfg(target_arch = "riscv64")]
-    pub fn set_return(&mut self, value: usize) {
-        self.regs[10] = value; // a0
-    }
 }
