@@ -1,0 +1,4 @@
+# Linker scripts
+*.ld linguist-vendored
+*.lds linguist-vendored
+*.x linguist-vendored
