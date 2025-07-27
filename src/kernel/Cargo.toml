@@ -16,3 +16,4 @@ default = ["kernel"]
 kernel = []
 
 [dependencies]
+derive = { path = "../derive" }

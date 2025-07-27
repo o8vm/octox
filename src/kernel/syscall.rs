@@ -1,6 +1,6 @@
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use crate::error::Error::*;
-use crate::error::Result;
+use crate::{error::Result, syscall};
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use crate::{
     array,
@@ -14,7 +14,7 @@ use crate::{
     pipe::Pipe,
     proc::*,
     riscv::PGSIZE,
-    stat::FileType,
+    stat::{FileType, Stat},
     trap::TICKS,
     vm::{Addr, UVAddr},
 };
@@ -25,6 +25,9 @@ use core::mem::variant_count;
 use core::mem::{size_of, size_of_val};
 #[cfg(all(target_os = "none", feature = "kernel"))]
 use core::{concat, str};
+
+// Import the derive macro from the derive crate
+use derive::SysCalls as SysCallsDerive;
 
 pub struct PId(pub usize);
 pub struct Fd(pub usize);
@@ -41,271 +44,61 @@ impl From<usize> for PId {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, SysCallsDerive)]
 #[repr(usize)]
 pub enum SysCalls {
-    Fork = 1,
-    Exit = 2,
-    Wait = 3,
-    Pipe = 4,
-    Read = 5,
-    Kill = 6,
-    Exec = 7,
-    Fstat = 8,
-    Chdir = 9,
-    Dup = 10,
-    Getpid = 11,
-    Sbrk = 12,
-    Sleep = 13,
-    Uptime = 14,
-    Open = 15,
-    Write = 16,
-    Mknod = 17,
-    Unlink = 18,
-    Link = 19,
-    Mkdir = 20,
-    Close = 21,
-    Dup2 = 22,
-    Fcntl = 23,
+    #[syscall(params(), ret(!))]
     Invalid = 0,
+    #[syscall(params(), ret(Result<usize>))]
+    Fork = 1,
+    #[syscall(params(xstatus: i32), ret(Result<()>))]
+    Exit = 2,
+    #[syscall(params(xstatus: &mut i32), ret(Result<usize>))]
+    Wait = 3,
+    #[syscall(params(p: &mut [usize]), ret(Result<()>))]
+    Pipe = 4,
+    #[syscall(params(fd: Fd, buf: &mut [u8]), ret(Result<usize>))]
+    Read = 5,
+    #[syscall(params(pid: PId), ret(Result<()>))]
+    Kill = 6,
+    #[syscall(params(filename: &str, argv: &[&str], envp: Option<&[Option<&str>]>), ret(Result<usize>))]
+    Exec = 7,
+    #[syscall(params(fd: Fd, st: &mut Stat), ret(Result<()>))]
+    Fstat = 8,
+    #[syscall(params(dirname: &str), ret(Result<()>))]
+    Chdir = 9,
+    #[syscall(params(fd: Fd), ret(Result<usize>))]
+    Dup = 10,
+    #[syscall(params(), ret(Result<usize>))]
+    Getpid = 11,
+    #[syscall(params(n: isize), ret(Result<usize>))]
+    Sbrk = 12,
+    #[syscall(params(n: usize), ret(Result<()>))]
+    Sleep = 13,
+    #[syscall(params(), ret(Result<usize>))]
+    Uptime = 14,
+    #[syscall(params(filename: &str, flags: usize), ret(Result<usize>))]
+    Open = 15,
+    #[syscall(params(fd: Fd, buf: &[u8]), ret(Result<usize>))]
+    Write = 16,
+    #[syscall(params(file: &str, major: u16, minor: u16), ret(Result<()>))]
+    Mknod = 17,
+    #[syscall(params(file: &str), ret(Result<()>))]
+    Unlink = 18,
+    #[syscall(params(file1: &str, file2: &str), ret(Result<()>))]
+    Link = 19,
+    #[syscall(params(dir: &str), ret(Result<()>))]
+    Mkdir = 20,
+    #[syscall(params(fd: Fd), ret(Result<()>))]
+    Close = 21,
+    #[syscall(params(src: Fd, dst: Fd), ret(Result<usize>))]
+    Dup2 = 22,
+    #[syscall(params(fd: Fd, cmd: FcntlCmd), ret(Result<usize>))]
+    Fcntl = 23,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Fn {
-    U(fn() -> Result<()>),    // return unit type
-    I(fn() -> Result<usize>), // return integer
-    N(fn() -> !),             // return never
-}
-impl Fn {
-    pub fn call(self) -> isize {
-        match self {
-            Fn::U(uni) => uni()
-                .and(Ok(0))
-                .or_else(|err| Ok::<isize, ()>(err as isize))
-                .unwrap(),
-            Fn::I(int) => int()
-                .map(|i| i as isize)
-                .or_else(|err| Ok::<isize, ()>(err as isize))
-                .unwrap(),
-            Fn::N(nev) => nev(),
-        }
-    }
-}
-impl SysCalls {
-    pub const TABLE: [(Fn, &'static str); variant_count::<Self>()] = [
-        (Fn::N(Self::invalid), ""),
-        (Fn::I(Self::fork), "()"), // Create a process, return child's PID.
-        (Fn::N(Self::exit), "(xstatus: i32)"), // Terminate the current process; status reported to wait(). No Return.
-        (Fn::I(Self::wait), "(xstatus: &mut i32)"), // Wait for a child to exit; exit status in &status; retunrs child PID.
-        (Fn::U(Self::pipe), "(p: &mut [usize])"), // Create a pipe, put read/write file descpritors in p[0] and p[1].
-        (Fn::I(Self::read), "(fd: usize, buf: &mut [u8])"), // Read n bytes into buf; returns number read; or 0 if end of file
-        (Fn::U(Self::kill), "(pid: usize)"), // Terminate process PID. Returns Ok(()) or Err(())
-        (
-            Fn::I(Self::exec),
-            "(filename: &str, argv: &[&str], envp: Option<&[Option<&str>]>)",
-        ), // Load a file and execute it with arguments; only returns if error.
-        (Fn::U(Self::fstat), "(fd: usize, st: &mut Stat)"), // Place info about an open file into st.
-        (Fn::U(Self::chdir), "(dirname: &str)"),            // Change the current directory.
-        (Fn::I(Self::dup), "(fd: usize)"), // Return a new file descpritor referring to the same file as fd.
-        (Fn::I(Self::getpid), "()"),       // Return the current process's PID.
-        (Fn::I(Self::sbrk), "(n: usize)"), // Grow process's memory by n bytes. Returns start fo new memory.
-        (Fn::U(Self::sleep), "(n: usize)"), // Pause for n clock ticks.
-        (Fn::I(Self::uptime), "()"),       // Return how many clock ticks since start.
-        (Fn::I(Self::open), "(filename: &str, flags: usize)"), // Open a file; flags indicate read/write; returns an fd.
-        (Fn::I(Self::write), "(fd: usize, b: &[u8])"), // Write n bytes from buf to file descpritor fd; returns n.
-        (Fn::U(Self::mknod), "(file: &str, mj: usize, mi: usize)"), // Create a device file
-        (Fn::U(Self::unlink), "(file: &str)"),         // Remove a file
-        (Fn::U(Self::link), "(file1: &str, file2: &str)"), // Create another name (file2) for the file file1.
-        (Fn::U(Self::mkdir), "(dir: &str)"),               // Create a new directory.
-        (Fn::U(Self::close), "(fd: usize)"),               // Release open file fd.
-        (Fn::I(Self::dup2), "(src: usize, dst: usize)"),   //
-        (Fn::I(Self::fcntl), "(fd: usize, cmd: FcntlCmd)"), //
-    ];
-    pub fn invalid() -> ! {
-        unimplemented!()
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-pub fn syscall() {
-    let p = Cpus::myproc().unwrap();
-    let pdata = p.data_mut();
-    let tf = pdata.trapframe.as_mut().unwrap();
-    let syscall_id = SysCalls::from_usize(tf.a7);
-    tf.a0 = match syscall_id {
-        SysCalls::Invalid => {
-            println!("{} {}: unknown sys call {}", p.pid(), pdata.name, tf.a7);
-            -1_isize as usize
-        }
-        _ => SysCalls::TABLE[syscall_id as usize].0.call() as usize,
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-enum Slice {
-    Ref(UVAddr),
-    Buf(SBInfo),
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-#[derive(Debug, Default, Clone, Copy)]
-#[repr(C)]
-struct SBInfo {
-    ptr: UVAddr,
-    len: usize,
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-unsafe impl AsBytes for SBInfo {}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-fn fetch_addr<T: AsBytes>(addr: UVAddr, buf: &mut T) -> Result<()> {
-    let p_data = Cpus::myproc().unwrap().data();
-    if addr.into_usize() >= p_data.sz || addr.into_usize() + size_of_val(buf) > p_data.sz {
-        return Err(BadVirtAddr);
-    }
-    either_copyin(buf, addr.into())
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-fn fetch_slice<T: AsBytes>(slice_info: Slice, buf: &mut [T]) -> Result<Option<usize>> {
-    let mut sbinfo: SBInfo = Default::default();
-    match slice_info {
-        Slice::Ref(addr) => {
-            fetch_addr(addr, &mut sbinfo)?;
-        }
-        Slice::Buf(info) => {
-            sbinfo = info;
-        }
-    }
-    if *sbinfo.ptr.get() == 0 {
-        // Option<&[&T]> = None
-        // sbinfo.len = 0;
-        return Ok(None);
-    }
-    if sbinfo.len > buf.len() {
-        return Err(NoBufferSpace);
-    } else {
-        either_copyin(&mut buf[..sbinfo.len], sbinfo.ptr.into())?;
-    }
-    Ok(Some(sbinfo.len))
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-fn argraw(n: usize) -> usize {
-    let tf = Cpus::myproc().unwrap().data().trapframe.as_ref().unwrap();
-    match n {
-        0 => tf.a0,
-        1 => tf.a1,
-        2 => tf.a2,
-        3 => tf.a3,
-        4 => tf.a4,
-        5 => tf.a5,
-        _ => panic!("arg"),
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-trait Arg {
-    type Out<'a>;
-    type In<'a>: AsBytes;
-    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>>;
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-impl Arg for SBInfo {
-    type In<'a> = SBInfo;
-    type Out<'a> = &'a SBInfo;
-    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
-        let addr: UVAddr = argraw(n).into();
-        fetch_addr(addr, input)?;
-        Ok(&*input)
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-impl Arg for Path {
-    type In<'a> = [u8; MAXPATH];
-    type Out<'a> = &'a Self;
-    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
-        let addr: UVAddr = argraw(n).into();
-        let len = fetch_slice(Slice::Ref(addr), input)?.ok_or(InvalidArgument)?;
-        Ok(Self::new(
-            str::from_utf8_mut(&mut input[..len])
-                .or(Err(Utf8Error))?
-                .trim_end_matches(char::from(0)),
-        ))
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-impl Arg for File {
-    type In<'a> = usize;
-    type Out<'a> = (&'a mut File, usize);
-    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
-        let p_data = Cpus::myproc().unwrap().data_mut();
-
-        *input = argraw(n);
-        match p_data.ofile.get_mut(*input).ok_or(FileDescriptorTooLarge)? {
-            Some(f) => Ok((f, *input)),
-            None => Err(BadFileDescriptor),
-        }
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-#[derive(Debug)]
-struct Argv([Option<String>; MAXARG]);
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-impl Arg for Argv {
-    type In<'a> = [SBInfo; MAXARG];
-    type Out<'a> = Self;
-    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
-        let mut argv = Argv(array![None; MAXARG]);
-        let mut buf = [0u8; PGSIZE];
-        let addr = UVAddr::from(argraw(n));
-
-        let n = fetch_slice(Slice::Ref(addr), input)?.ok_or(InvalidArgument)?;
-        for (i, &argument) in input.iter().take(n).enumerate() {
-            if let Some(len) = fetch_slice(Slice::Buf(argument), &mut buf).unwrap() {
-                let arg_str = str::from_utf8_mut(&mut buf[..len])
-                    .or(Err(Utf8Error))
-                    .unwrap();
-                argv.0[i].replace(arg_str.to_string());
-            }
-        }
-        Ok(argv)
-    }
-}
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-#[derive(Debug)]
-struct Envp([Option<String>; MAXARG]);
-
-#[cfg(all(target_os = "none", feature = "kernel"))]
-impl Arg for Envp {
-    type In<'a> = [SBInfo; MAXARG];
-    type Out<'a> = Self;
-    fn from_arg<'a>(n: usize, input: &'a mut Self::In<'a>) -> Result<Self::Out<'a>> {
-        let mut envp = Envp(array![None; MAXARG]);
-        let mut buf = [0u8; PGSIZE];
-        let addr = UVAddr::from(argraw(n));
-
-        let Some(n) = fetch_slice(Slice::Ref(addr), input)? else {
-            return Ok(envp);
-        };
-        for (i, &env) in input.iter().take(n).enumerate() {
-            if let Some(len) = fetch_slice(Slice::Buf(env), &mut buf).unwrap() {
-                let env_str = str::from_utf8_mut(&mut buf[..len])
-                    .or(Err(Utf8Error))
-                    .unwrap();
-                envp.0[i].replace(env_str.to_string());
-            }
-        }
-        Ok(envp)
-    }
-}
+// The derive macro will generate the necessary implementation code
+// including dispatch tables and wrapper functions
 
 #[cfg(all(target_os = "none", feature = "kernel"))]
 fn fdalloc(file: File) -> Result<usize> {
@@ -684,180 +477,4 @@ impl SysCalls {
     }
 }
 
-impl SysCalls {
-    pub fn from_usize(n: usize) -> Self {
-        match n {
-            1 => Self::Fork,
-            2 => Self::Exit,
-            3 => Self::Wait,
-            4 => Self::Pipe,
-            5 => Self::Read,
-            6 => Self::Kill,
-            7 => Self::Exec,
-            8 => Self::Fstat,
-            9 => Self::Chdir,
-            10 => Self::Dup,
-            11 => Self::Getpid,
-            12 => Self::Sbrk,
-            13 => Self::Sleep,
-            14 => Self::Uptime,
-            15 => Self::Open,
-            16 => Self::Write,
-            17 => Self::Mknod,
-            18 => Self::Unlink,
-            19 => Self::Link,
-            20 => Self::Mkdir,
-            21 => Self::Close,
-            22 => Self::Dup2,
-            23 => Self::Fcntl,
-            _ => Self::Invalid,
-        }
-    }
-}
-
-// Generate system call interface for userland
-#[cfg(not(target_os = "none"))]
-impl SysCalls {
-    pub fn into_enum_iter() -> std::vec::IntoIter<SysCalls> {
-        (0..core::mem::variant_count::<SysCalls>())
-            .map(SysCalls::from_usize)
-            .collect::<Vec<SysCalls>>()
-            .into_iter()
-    }
-    pub fn signature(self) -> String {
-        let syscall = Self::TABLE[self as usize];
-        format!(
-            "fn {}{} -> {}",
-            self.fn_name(),
-            syscall.1,
-            self.return_type()
-        )
-    }
-    pub fn return_type(&self) -> &'static str {
-        match Self::TABLE[*self as usize].0 {
-            Fn::I(_) => "Result<usize>",
-            Fn::U(_) => "Result<()>",
-            Fn::N(_) => "!",
-        }
-    }
-    pub fn fn_name(&self) -> String {
-        format!("{:?}", self).to_lowercase()
-    }
-    pub fn args(&self) -> Vec<(&'static str, &'static str)> {
-        Self::TABLE[*self as usize]
-            .1
-            .strip_suffix(')')
-            .unwrap()
-            .strip_prefix('(')
-            .unwrap()
-            .split(',')
-            .filter_map(|s| s.trim().split_once(": "))
-            .collect::<Vec<(&str, &str)>>()
-    }
-
-    pub fn gen_usys(self) -> String {
-        let mut i = 0;
-        let indent = 4;
-        let part1 = format!(
-            r#"
-pub {} {{
-    let _ret: isize;
-    unsafe {{
-        asm!(
-            "ecall",{}"#,
-            self.signature(),
-            "\n",
-        );
-        let mut part2 = self
-            .args()
-            .iter()
-            .map(|s| match s {
-                (_, s1) if s1.contains("&str") | s1.contains("&[") | s1.contains("&mut [") => {
-                    let ret = format!(
-                        "{:indent$}in(\"a{}\") &{} as *const _ as usize,\n",
-                        "",
-                        i,
-                        s.0,
-                        indent = indent * 3
-                    );
-                    i += 1;
-                    ret
-                }
-                (_, s1) if !s1.contains(']') && s1.contains("&mut ") => {
-                    let ret = format!(
-                        "{:indent$}in(\"a{}\") {} as *mut _ as usize,\n",
-                        "",
-                        i,
-                        s.0,
-                        indent = indent * 3
-                    );
-                    i += 1;
-                    ret
-                }
-                (_, s1) if !s1.contains(']') && s1.contains('&') => {
-                    let ret = format!(
-                        "{:indent$}in(\"a{}\") {} as *const _ as usize,\n",
-                        "",
-                        i,
-                        s.0,
-                        indent = indent * 3
-                    );
-                    i += 1;
-                    ret
-                }
-                (_, s1) if s1.contains("FcntlCmd") => {
-                    let ret = format!(
-                        "{:indent$}in(\"a{}\") {} as usize,\n",
-                        "",
-                        i,
-                        s.0,
-                        indent = indent * 3
-                    );
-                    i += 1;
-                    ret
-                }
-                (_, _) => {
-                    let ret = format!(
-                        "{:indent$}in(\"a{}\") {},\n",
-                        "",
-                        i,
-                        s.0,
-                        indent = indent * 3
-                    );
-                    i += 1;
-                    ret
-                }
-            })
-            .collect::<Vec<String>>();
-        let part3 = format!(
-            r#"{:indent$}in("a7") {},
-            lateout("a0") _ret,
-        );
-    }}
-"#,
-            "",
-            self as usize,
-            indent = indent * 3
-        );
-        let part4 = format!(
-            "{:indent$}{}\n}}",
-            "",
-            match Self::TABLE[self as usize].0 {
-                Fn::I(_) =>
-                    "match _ret { 0.. => Ok(_ret as usize), _ => Err(Error::from_isize(_ret)) }",
-                Fn::U(_) => "match _ret { 0 => Ok(()), _ => Err(Error::from_isize(_ret)) }",
-                Fn::N(_) => "unreachable!()",
-            },
-            indent = indent
-        );
-        let mut gen_syscall: Vec<String> = Vec::new();
-        gen_syscall.push(part1);
-        gen_syscall.append(&mut part2);
-        gen_syscall.push(part3);
-        gen_syscall.push(part4);
-        gen_syscall
-            .iter()
-            .flat_map(|s| s.chars())
-            .collect::<String>()
-    }
-}
+// The remaining functionality will be automatically generated by the derive macro
