@@ -67,7 +67,7 @@ fn emit_trait(registry: &ir::SyscallRegistry) -> TokenStream {
 
         #[cfg(all(target_os = "none", feature = "kernel"))]
         trait SyscallDispatch {
-            fn copyin<T: AsBytes>(dst: &mut T, src: usize) -> Result<()> {
+            fn copyin<T: ?Sized + AsBytes>(dst: &mut T, src: usize) -> Result<()> {
                 unimplemented!("copyin must be implemented by kernel")
                 }
 
@@ -75,7 +75,7 @@ fn emit_trait(registry: &ir::SyscallRegistry) -> TokenStream {
                 #dispatch_body
             }
 
-            fn copyout<T: AsBytes>(dst: usize, src: &T) -> Result<()> {
+            fn copyout<T: ?Sized + AsBytes>(dst: usize, src: &T) -> Result<()> {
                 unimplemented!("copyout must be implemented by kernel")
             }
 
@@ -357,7 +357,7 @@ fn emit_type(ty: &ir::Type) -> TokenStream {
             quote!(Option<#inner_ty>)
         }
         ir::Type::Custom(tokens) => {
-            // 元のトークンストリームをそのまま使用
+            // use original tokens for custom types
             tokens.clone()
         }
     }
@@ -398,19 +398,25 @@ fn emit_return_type(ret: &ir::ReturnType) -> TokenStream {
 /// # Returns
 /// TokenStream containing the userspace syscall implementation
 fn emit_user_body(syscall: &ir::Syscall) -> TokenStream {
-    // Architecture detection at compile time
-    #[cfg(target_arch = "aarch64")]
-    {
-        emit_user_body_generic::<ir::Aarch64>(syscall)
-    }
-    #[cfg(target_arch = "riscv64")]
-    {
-        emit_user_body_generic::<ir::RiscV64>(syscall)
-    }
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv64")))]
-    {
-        emit_user_body_generic::<ir::Aarch64>(syscall)
-    }
+    // Generate code with target-time architecture detection
+    // (not host-time detection like proc_macro execution)
+    let aarch64_body = emit_user_body_generic::<ir::Aarch64>(syscall);
+    let riscv64_body = emit_user_body_generic::<ir::RiscV64>(syscall);
+
+    quote!(
+        #[cfg(target_arch = "aarch64")]
+        {
+            #aarch64_body
+        }
+        #[cfg(target_arch = "riscv64")]
+        {
+            #riscv64_body
+        }
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "riscv64")))]
+        {
+            #aarch64_body
+        }
+    )
 }
 
 /// Generates architecture-specific userspace syscall implementation.
@@ -579,16 +585,19 @@ fn emit_dispatch_body(registry: &ir::SyscallRegistry) -> TokenStream {
     for syscall in &registry.syscalls {
         let id = Literal::u16_unsuffixed(syscall.id.0);
         let handler = emit_syscall_handler(syscall);
-        match_arms.extend(quote!(@id => #handler,));
+        match_arms.extend(quote!(@id => {
+            let handler_result = #handler;
+            handler_result.into_isize()
+        },));
     }
 
     quote!(
-        let result = match tf.syscall_num() as u16 {
+        let result_isize = match tf.syscall_num() as u16 {
             #match_arms
-            _ => Err(Error::ENOSYS),
+            _ => Error::ENOSYS as isize,
         };
 
-        tf.set_return(result.into_isize() as usize);
+        tf.set_return(result_isize as usize);
         Ok(())
     )
 }
@@ -681,6 +690,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
     let mut args = TokenStream::new();
 
     for (i, param) in params.iter().enumerate() {
+        let arg_name_owned = Ident::new(&format!("_arg{}", i), Span::call_site());
         let arg_name = Ident::new(&format!("arg{}", i), Span::call_site());
         let index = Literal::usize_unsuffixed(i);
 
@@ -719,36 +729,47 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                     )
                 }
             }
-            ir::Type::Slice { inner, .. } => {
+            ir::Type::Slice { inner, mutable } => {
                 match inner.as_ref() {
                     // Handle &[&str] - array of string references
                     ir::Type::Str { .. } => {
+                        let let_keyword = if *mutable {
+                            quote!(let mut)
+                        } else {
+                            quote!(let)
+                        };
                         quote!(
-                            let @arg_name = {
+                            #let_keyword @arg_name_owned = {
                                 let mut fat: (*const (*const u8, usize), usize) = (core::ptr::null(), 0);
                                 Self::copyin(&mut fat, tf.arg(@index))?;
 
-                                let mut str_fats = vec![(core::ptr::null(), 0usize); fat.1];
+                                let mut str_fats: Vec<(*const u8, usize)> = vec![(core::ptr::null(), 0usize); fat.1];
                                 Self::copyin(&mut str_fats[..], fat.0 as usize)?;
 
-                                let mut argv_vec = Vec::with_capacity(fat.1);
+                                let mut string_vec = Vec::with_capacity(fat.1);
                                 for str_fat in str_fats {
                                     let mut buf = vec![0u8; str_fat.1];
                                     Self::copyin(&mut buf[..], str_fat.0 as usize)?;
 
                                     let s = String::from_utf8(buf)
                                         .map_err(|_| Error::EINVAL)?;
-                                    argv_vec.push(s);
+                                    string_vec.push(s);
                                 }
-                                argv_vec
+                                string_vec
                             };
+                            #let_keyword @arg_name: Vec<&str> = @arg_name_owned.iter().map(String::as_str).collect();
                         )
                     }
                     // Handle &[T] for other types
                     _ => {
                         let inner_ty = emit_type(inner);
+                        let let_keyword = if *mutable {
+                            quote!(let mut)
+                        } else {
+                            quote!(let)
+                        };
                         quote!(
-                            let @arg_name = {
+                            #let_keyword @arg_name = {
                                 let mut fat: (*const #inner_ty, usize) = (core::ptr::null(), 0);
                                 Self::copyin(&mut fat, tf.arg(@index))?;
 
@@ -761,9 +782,14 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                     }
                 }
             }
-            ir::Type::Str { .. } => {
+            ir::Type::Str { mutable } => {
+                let let_keyword = if *mutable {
+                    quote!(let mut)
+                } else {
+                    quote!(let)
+                };
                 quote!(
-                    let @arg_name =  {
+                    #let_keyword @arg_name_owned =  {
                         let mut fat: (*const u8, usize) = (core::ptr::null(), 0);
                         Self::copyin(&mut fat, tf.arg(@index))?;
 
@@ -773,6 +799,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                         String::from_utf8(buf)
                             .map_err(|_| Error::EINVAL)?
                     };
+                    #let_keyword @arg_name = @arg_name_owned.as_str();
                 )
             }
             ir::Type::Option { inner } => {
@@ -785,36 +812,40 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                             ir::Type::Option { inner: opt_inner } => {
                                 if matches!(opt_inner.as_ref(), ir::Type::Str { .. }) {
                                     quote!(
-                                        let @arg_name = {
+                                        let @arg_name_owned = {
                                             let opt_addr = tf.arg(@index);
                                             if opt_addr == 0 {
                                                 None
                                             } else {
-                                                let mut fat: (*const usize, usize) = (core::ptr::null(), 0);
+                                                let mut fat: (*const (*const u8, usize), usize) = (core::ptr::null(), 0);
                                                 Self::copyin(&mut fat, opt_addr)?;
 
-                                                let mut opt_ptrs = vec![0usize; fat.1];
-                                                Self::copyin(&mut opt_ptrs[..], fat.0 as usize)?;
+                                                let mut str_fats: Vec<(*const u8, usize)> = vec![(core::ptr::null(), 0usize); fat.1];
+                                                Self::copyin(&mut str_fats[..], fat.0 as usize)?;
 
-                                                let mut envp_vec = Vec::with_capacity(fat.1);
-                                                for opt_ptr in opt_ptrs {
-                                                    if opt_ptr == 0 {
-                                                        envp_vec.push(None);
+                                                let mut string_vec = Vec::with_capacity(fat.1);
+                                                for str_fat in str_fats {
+                                                    if str_fat.0.is_null() {
+                                                        string_vec.push(None);
                                                     } else {
-                                                        let mut str_fat: (*const u8, usize) = (core::ptr::null(), 0);
-                                                        Self::copyin(&mut str_fat, opt_ptr)?;
-
                                                         let mut buf = vec![0u8; str_fat.1];
                                                         Self::copyin(&mut buf[..], str_fat.0 as usize)?;
 
                                                         let s = String::from_utf8(buf)
                                                             .map_err(|_| Error::EINVAL)?;
-                                                        envp_vec.push(Some(s));
+                                                        string_vec.push(Some(s));
                                                     }
                                                 }
-                                                Some(envp_vec)
+                                                Some(string_vec)
                                             }
                                         };
+                                        let @arg_name = @arg_name_owned.as_ref().map(|string_vec| {
+                                            let mut args = Vec::with_capacity(string_vec.len());
+                                            for opt_s in string_vec {
+                                                args.push(opt_s.as_ref().map(String::as_str));
+                                            }
+                                            args
+                                        });
                                     )
                                 } else {
                                     // Handle other Option<&[Option<T>]> types
@@ -839,7 +870,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                             // Handle Option<&[&str]> - optional array of strings
                             ir::Type::Str { .. } => {
                                 quote!(
-                                    let @arg_name = {
+                                    let @arg_name_owned = {
                                         let opt_addr = tf.arg(@index);
                                         if opt_addr == 0 {
                                             None
@@ -847,7 +878,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                                             let mut fat: (*const (*const u8, usize), usize) = (core::ptr::null(), 0);
                                             Self::copyin(&mut fat, opt_addr)?;
 
-                                            let mut str_fats = vec![(core::ptr::null(), 0usize); fat.1];
+                                            let mut str_fats: Vec<(*cont u8, usize)> = vec![(core::ptr::null(), 0usize); fat.1];
                                             Self::copyin(&mut str_fats[..], fat.0 as usize)?;
 
                                             let mut string_vec = Vec::with_capacity(fat.1);
@@ -862,6 +893,9 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                                             Some(string_vec)
                                         }
                                     };
+                                    let @arg_name = @arg_name_owned.as_ref().map(|string_vec| {
+                                        string_vec.iter().map(String::as_str).collect()
+                                    });
                                 )
                             }
                             // Handle other Option<&[T]> types
@@ -887,7 +921,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                     }
                     ir::Type::Str { .. } => {
                         quote!(
-                            let @arg_name = {
+                            let @arg_name_owned = {
                                 let opt_addr = tf.arg(@index);
                                 if opt_addr == 0 {
                                     None
@@ -902,6 +936,7 @@ fn emit_handler_args(params: &[ir::Param]) -> TokenStream {
                                     )
                                 }
                             };
+                            let @arg_name = @arg_name_owned.as_ref().map(String::as_str);
                         )
                     }
                     ir::Type::Value(_) => {
@@ -988,25 +1023,25 @@ fn emit_args_conversion(params: &[ir::Param]) -> TokenStream {
             }
             ir::Type::Ref { mutable, .. } => {
                 if *mutable {
-                    quote!(&mut *@arg_name) // Box<T> => &mut T
+                    quote!(&mut @arg_name) // T => &mut T
                 } else {
-                    quote!(&*@arg_name) // Box<T> => &T
+                    quote!(&@arg_name) // T => &T
                 }
             }
             ir::Type::Option { inner } => {
                 match inner.as_ref() {
                     ir::Type::Slice { mutable, .. } => {
                         if *mutable {
-                            quote!(&mut @arg_name.as_deref_mut()) // Option<Vec<T>> => &mut [T]
+                            quote!(@arg_name.as_deref_mut()) // Option<Vec<T>> => &mut [T]
                         } else {
-                            quote!(&@arg_name.as_deref()) // Option<Vec<T>> => &[T]
+                            quote!(@arg_name.as_deref()) // Option<Vec<T>> => &[T]
                         }
                     }
                     ir::Type::Str { mutable } => {
                         if *mutable {
-                            quote!(&mut @arg_name.as_deref_mut()) // Option<String> => &mut str
+                            quote!(@arg_name.as_deref_mut()) // Option<String> => &mut str
                         } else {
-                            quote!(&@arg_name.as_deref()) // Option<String> => &str
+                            quote!(@arg_name.as_deref()) // Option<String> => &str
                         }
                     }
                     _ => quote!(@arg_name), // Other types passed directly
