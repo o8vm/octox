@@ -99,12 +99,23 @@ impl Parser {
             }
 
             let variant_name = cursor.parse_ident()?;
+            
+            // Parse optional discriminant (= value)
+            let discriminant = if cursor.check_punct('=') {
+                cursor.bump(); // consume '='
+                let lit = cursor.parse_literal()?;
+                Some(lit.to_string().parse::<usize>()
+                    .map_err(|_| Error::new("Invalid discriminant value", lit.span()))?)
+            } else {
+                None
+            };
+            
             cursor.expect_punct(',')?;
 
-            if let Some((id, params, ret)) = syscall_attr {
+            if let Some((params, ret)) = syscall_attr {
                 variants.push(ast::Variant {
                     name: variant_name,
-                    id,
+                    id: discriminant,
                     params,
                     ret,
                 });
@@ -127,7 +138,7 @@ impl Parser {
     /// * `Err(Error)` - Malformed syscall attribute syntax
     fn parse_syscall_attr(
         attr_body: TokenStream,
-    ) -> Result<Option<(usize, Vec<ast::Param>, ast::ReturnType)>> {
+    ) -> Result<Option<(Vec<ast::Param>, ast::ReturnType)>> {
         let mut attr_tokens = attr_body.into_iter().peekable();
         let mut cursor = TokenCursor::new(&mut attr_tokens);
 
@@ -136,15 +147,14 @@ impl Parser {
         }
 
         let params_body = cursor.parse_group(Delimiter::Parenthesis)?;
-        let (id, params, ret) = Self::parse_syscall_params(params_body)?;
+        let (params, ret) = Self::parse_syscall_params(params_body)?;
 
-        Ok(Some((id, params, ret)))
+        Ok(Some((params, ret)))
     }
 
     /// Parses the parameter list within a syscall attribute.
     ///
     /// This method processes the content inside `syscall(...)` and extracts:
-    /// - The syscall ID number
     /// - Parameter specifications with names and types  
     /// - Return type specification
     ///
@@ -152,15 +162,14 @@ impl Parser {
     /// * `params_body` - TokenStream containing the syscall parameters
     ///
     /// # Returns
-    /// * `Ok((id, params, ret))` - Parsed syscall metadata
+    /// * `Ok((params, ret))` - Parsed syscall metadata
     /// * `Err(Error)` - Invalid parameter syntax
     fn parse_syscall_params(
         params_body: TokenStream,
-    ) -> Result<(usize, Vec<ast::Param>, ast::ReturnType)> {
+    ) -> Result<(Vec<ast::Param>, ast::ReturnType)> {
         let mut params_tokens = params_body.into_iter().peekable();
         let mut cursor = TokenCursor::new(&mut params_tokens);
 
-        let mut id = None;
         let mut params = Vec::new();
         let mut ret = None;
 
@@ -168,16 +177,6 @@ impl Parser {
             let key = cursor.parse_ident()?;
 
             match key.to_string().as_str() {
-                "id" => {
-                    cursor.expect_punct('=')?;
-                    let id_lit = cursor.parse_literal()?;
-                    id = Some(
-                        id_lit
-                            .to_string()
-                            .parse::<usize>()
-                            .map_err(|_| Error::new("Invalid syscall ID", id_lit.span()))?,
-                    );
-                }
                 "params" => {
                     let params_group = cursor.parse_group(Delimiter::Parenthesis)?;
                     params = Self::parse_params_list(params_group)?;
@@ -194,10 +193,9 @@ impl Parser {
             cursor.eat_punct(','); // Skip the comma
         }
 
-        let id = id.ok_or_else(|| Error::new("Syscall ID is required", cursor.span()))?;
         let ret = ret.ok_or_else(|| Error::new("Return type is required", cursor.span()))?;
 
-        Ok((id, params, ret))
+        Ok((params, ret))
     }
 
     /// Parses a parameter list within the syscall attribute parameters section.
@@ -420,6 +418,22 @@ impl<'a> TokenCursor<'a> {
                 self.span(),
             )),
             None => Err(Error::new("Unexpected end of input", self.span())),
+        }
+    }
+
+    /// Checks if the next token is a specific punctuation character without consuming it.
+    ///
+    /// # Arguments
+    /// * `ch` - The punctuation character to check for
+    ///
+    /// # Returns
+    /// * `true` - Character matches (cursor unchanged)
+    /// * `false` - Character does not match
+    fn check_punct(&mut self, ch: char) -> bool {
+        if let Some(TokenKind::Punct(c)) = self.peek_kind() {
+            c == ch
+        } else {
+            false
         }
     }
 

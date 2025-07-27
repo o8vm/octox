@@ -22,7 +22,8 @@ pub struct Variant {
     /// The identifier name of the variant (e.g., `Read`, `Write`)
     pub name: Ident,
     /// The unique syscall number used for identification in the kernel
-    pub id: usize,
+    /// None means the ID should be inferred from enum discriminant
+    pub id: Option<usize>,
     /// Ordered list of parameters that this syscall accepts
     pub params: Vec<Param>,
     /// The return type specification for this syscall

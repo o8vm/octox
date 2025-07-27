@@ -53,7 +53,17 @@ pub fn lower_to_ir(ast: ast::Enum) -> Result<ir::SyscallRegistry> {
 /// * `Ok(ir::Syscall)` - Successfully converted syscall definition
 /// * `Err(Error)` - Parameter validation or conversion error
 fn lower_variant(variant: ast::Variant) -> Result<ir::Syscall> {
-    let id = ir::SyscallId::from(variant.id as u16);
+    // Require explicit discriminant for syscall ID
+    let id_value = variant.id.ok_or_else(|| {
+        Error::new(
+            format!(
+                "Syscall variant '{}' must have an explicit discriminant (e.g., '{}' = 42)",
+                variant.name, variant.name
+            ),
+            variant.name.span(),
+        )
+    })?;
+    let id = ir::SyscallId::from(id_value as u16);
 
     let mut params = Vec::new();
 

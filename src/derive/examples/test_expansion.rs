@@ -110,23 +110,23 @@ pub type Result<T> = core::result::Result<T, Error>;
 #[derive(SysCalls)]
 enum SysCalls {
     /// Read data from a file descriptor into a buffer.
-    #[syscall(id = 0, params(fd: Fd, buf: &mut [u8]), ret(Result<usize>))]
-    Read,
+    #[syscall(params(fd: Fd, buf: &mut [u8]), ret(Result<usize>))]
+    Read = 0,
     /// Write data from a buffer to a file descriptor.
-    #[syscall(id = 1, params(fd: Fd, buf: &[u8]), ret(Result<usize>))]
-    Write,
+    #[syscall(params(fd: Fd, buf: &[u8]), ret(Result<usize>))]
+    Write = 1,
     /// Open a file with specified flags and return a file descriptor.
-    #[syscall(id = 2, params(path: &str, flags: usize), ret(Result<Fd>))]
-    Open,
+    #[syscall(params(path: &str, flags: usize), ret(Result<Fd>))]
+    Open = 2,
     /// Execute a program with given arguments and environment.
-    #[syscall(id = 3, params(filename: &str, argv: &[&str], envp: Option<&[Option<&str>]>), ret(Result<()>))]
-    Exec,
+    #[syscall(params(filename: &str, argv: &[&str], envp: Option<&[Option<&str>]>), ret(Result<()>))]
+    Exec = 3,
     /// Fork the current process and return the new process ID.
-    #[syscall(id = 4, params(), ret(Result<PId>))]
-    Fork,
+    #[syscall(params(), ret(Result<PId>))]
+    Fork = 4,
     /// Get file statistics for a file descriptor.
-    #[syscall(id = 5, params(fd: Fd, st: &mut Stat), ret(Result<usize>))]
-    Fstat,
+    #[syscall(params(fd: Fd, st: &mut Stat), ret(Result<usize>))]
+    Fstat = 5,
     /// Invalid syscall variant for testing purposes.
     Invalid,
 }
