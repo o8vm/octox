@@ -15,12 +15,12 @@
 #![allow(dead_code)]
 
 extern crate alloc;
-use derive::{SysErrs, SysCalls};
+use derive::{SysCalls, SysErrs};
 
 use core::alloc::{GlobalAlloc, Layout};
 // Import common types that might be used by generated code
 #[allow(unused_imports)]
-use alloc::{vec, vec::Vec, string::String, boxed::Box, collections::BTreeMap};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, vec, vec::Vec};
 
 /// Dummy global allocator for no_std environment.
 /// This is a minimal allocator that just panics on allocation attempts.
@@ -60,6 +60,8 @@ pub enum Error {
     BadVirtAddr = -5,
     /// Invalid argument passed to syscall
     InvalidArgument = -23,
+    /// Invalid argument passed to syscall
+    EINVAL = -22,
     /// System call not implemented
     ENOSYS = -38,
 }
@@ -140,10 +142,28 @@ pub trait AsBytes {}
 impl AsBytes for u8 {}
 
 /// AsBytes implementation for byte slices.
-impl AsBytes for [u8] {}
+
+/// AsBytes implementation for generic slices of AsBytes types.
+impl<T> AsBytes for [T] where T: AsBytes {}
 
 /// AsBytes implementation for file statistics structure.
 impl AsBytes for Stat {}
+
+/// AsBytes implementation for usize.
+impl AsBytes for usize {}
+
+/// AsBytes implementation for (*const u8, usize) tuples.
+//impl AsBytes for (*const u8, usize) {}
+
+impl<T> AsBytes for (*const T, usize) where T: AsBytes {}
+/// AsBytes implementation for (*const (*const u8, usize), usize) tuples.
+//impl AsBytes for (*const (*const u8, usize), usize) {}
+
+/// AsBytes implementation for (*const usize, usize) tuples.
+//:impl AsBytes for (*const usize, usize) {}
+
+/// AsBytes implementation for vectors.
+impl<T> AsBytes for Vec<T> where T: Copy {}
 
 /// Kernel trap frame structure for syscall handling.
 ///
