@@ -1,7 +1,6 @@
-use kernel::syscall::*;
 use std::{
-    fs::{self, File},
-    io::{self, Write},
+    fs,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -17,19 +16,6 @@ fn main() {
     let src_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("lib");
     let dst_dir = root_out_dir.join("lib");
     copy_files(&src_dir, &dst_dir, Some("_")).expect("failed to copy user etc");
-
-    // build syscall interface file usys.rs
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    let mut usys_rs =
-        File::create(out_dir.join("usys.rs")).expect("cloudn't create OUT_DIR/usys.rs");
-    usys_rs
-        .write_all("// Created by build.rs\n\n".as_bytes())
-        .expect("OUT_DIR/usys.rs: write error");
-    for syscall_id in SysCalls::into_enum_iter().skip(1) {
-        usys_rs
-            .write_all(syscall_id.gen_usys().as_bytes())
-            .expect("usys write error");
-    }
 
     // set linker script
     let local_path = Path::new(env!("CARGO_MANIFEST_DIR"));
