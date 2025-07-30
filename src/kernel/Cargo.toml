@@ -1,5 +1,5 @@
 [package]
-name = "libkernel"
+name = "octox_kernel"
 description = "A Rust-based library kernel"
 authors = ["Hayato Ohhashi <o8@vmm.dev>"]
 edition = "2024"
@@ -14,6 +14,7 @@ path = "lib.rs"
 [features]
 default = ["kernel"]
 kernel = []
+user = []
 
 [dependencies]
-derive = { path = "../derive" }
+octox_macros = { workspace = true }

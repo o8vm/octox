@@ -1,10 +1,9 @@
 #![cfg_attr(target_os = "none", no_std)]
-#![cfg_attr(
-    all(target_os = "none", feature = "kernel"),
-    feature(alloc_error_handler)
-)]
-#![cfg_attr(all(target_os = "none", feature = "kernel"), feature(allocator_api))]
-#![feature(variant_count)]
+// #![cfg_attr(
+//     all(target_os = "none", feature = "kernel"),
+//     feature(alloc_error_handler)
+// )]
+// #![cfg_attr(all(target_os = "none", feature = "kernel"), feature(allocator_api))]
 #![allow(clippy::missing_safety_doc)]
 
 #[cfg(all(target_os = "none", feature = "kernel"))]

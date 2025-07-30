@@ -1,5 +1,5 @@
 [package]
-name = "uprogs"
+name = "octox_uprogs"
 description = "octox user programs"
 authors = ["Hayato Ohhashi <o8@vmm.dev>"]
 edition = "2024"
@@ -80,7 +80,4 @@ name = "_jell"
 path = "bin/jell.rs"
 
 [dependencies]
-libkernel = { workspace = true }
-
-[build-dependencies]
-libkernel = { workspace = true }
+octox_kernel = { workspace = true }

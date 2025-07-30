@@ -34,7 +34,7 @@ fn main() {
 fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = Command::new(cargo);
-    cmd.arg("install").arg("uprogs");
+    cmd.arg("install").arg("octox_uprogs");
     let local_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("src")
         .join("user");
@@ -83,7 +83,7 @@ fn build_uprogs(out_dir: &Path) -> (PathBuf, Vec<PathBuf>) {
 fn build_mkfs(out_dir: &Path) -> PathBuf {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let mut cmd = Command::new(cargo);
-    cmd.arg("install").arg("mkfs");
+    cmd.arg("install").arg("octox_mkfs");
 
     // get HOST triple
     if let Ok(host) = std::env::var("HOST") {

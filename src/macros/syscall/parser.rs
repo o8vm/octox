@@ -58,6 +58,9 @@ impl Parser {
         let mut cursor = TokenCursor::new(&mut self.tokens);
         cursor.skip_attributes()?;
 
+        // Skip optional visibility modifier (pub)
+        cursor.eat_ident("pub");
+
         if !cursor.eat_ident("enum") {
             return Err(Error::new("Expected 'enum' keyword", cursor.span()));
         }

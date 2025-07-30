@@ -15,10 +15,10 @@ unsafe extern "C" {
 #[global_allocator]
 pub static KMEM: Kmem = Kmem(Mutex::new(BuddyAllocator::new(), "kmem"));
 
-#[alloc_error_handler]
-fn on_oom(layout: Layout) -> ! {
-    panic!("alloc error: {:?}", layout)
-}
+// #[alloc_error_handler]
+// fn on_oom(layout: Layout) -> ! {
+//     panic!("alloc error: {:?}", layout)
+// }
 
 pub struct Kmem(Mutex<BuddyAllocator>);
 

@@ -122,6 +122,7 @@ unsafe impl AsBytes for Ipv4Addr {}
 unsafe impl AsBytes for Option<&str> {}
 unsafe impl AsBytes for Option<&[u8]> {}
 
+// FromBytes implementations
 unsafe impl FromBytes for u8 {}
 unsafe impl FromBytes for u16 {}
 unsafe impl FromBytes for u32 {}

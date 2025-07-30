@@ -5,6 +5,7 @@ use crate::memlayout::{
 };
 use crate::proc::PROCS;
 use crate::riscv::{PGSHIFT, PGSIZE, pgroundup, pteflags::*, registers::satp, sfence_vma};
+use crate::sleeplock;
 use crate::sync::OnceLock;
 use alloc::boxed::Box;
 use core::cmp::{Ord, PartialEq, PartialOrd};
@@ -61,8 +62,8 @@ impl From<KVAddr> for VirtAddr {
 }
 
 impl From<PAddr> for VirtAddr {
-    fn from(pv: PAddr) -> Self {
-        VirtAddr::Physical(pv.0)
+    fn from(pa: PAddr) -> Self {
+        VirtAddr::Physical(pa.0)
     }
 }
 
@@ -80,9 +81,7 @@ where
         + PartialOrd,
 {
     fn get(&self) -> &usize;
-
     fn get_mut(&mut self) -> &mut usize;
-
     fn into_usize(self) -> usize;
 
     fn is_aligned(&self) -> bool {
@@ -105,6 +104,12 @@ pub trait VAddr: Addr + Debug {
     // Sv39, to avoid having to sign-extend virtual addresses
     // that have the high bit set.
     const MAXVA: usize = 1 << (9 + 9 + 9 + 12 - 1);
+    fn is_user(&self) -> bool;
+    
+    /// 仮想アドレス空間のタイプを判定
+    fn is_kernel(&self) -> bool {
+        !self.is_user()
+    }
 }
 
 macro_rules! impl_addr {
@@ -156,21 +161,32 @@ macro_rules! impl_addr {
     };
 }
 
-macro_rules! impl_vaddr {
-    ($typ:ident) => {
-        impl VAddr for $typ {
-            fn px(&self, level: usize) -> usize {
-                (self.0 >> (PGSHIFT + 9 * level)) & Self::PXMASK
-            }
-        }
-    };
-}
-
 impl_addr!(PAddr);
 impl_addr!(KVAddr);
 impl_addr!(UVAddr);
-impl_vaddr!(KVAddr);
-impl_vaddr!(UVAddr);
+
+// 仮想アドレスのみがVAddrトレイトを実装（型安全性）
+impl VAddr for KVAddr {
+    fn px(&self, level: usize) -> usize {
+        (self.0 >> (PGSHIFT + 9 * level)) & Self::PXMASK
+    }
+    fn is_user(&self) -> bool {
+        false
+    }
+}
+
+impl VAddr for UVAddr {
+    fn px(&self, level: usize) -> usize {
+        (self.0 >> (PGSHIFT + 9 * level)) & Self::PXMASK
+    }
+    fn is_user(&self) -> bool {
+        true
+    }
+}
+
+// PAddrは物理アドレスなので、VAddrトレイトは実装しない（型安全性のため）
+
+// VirtAddrに必要なAddrトレイトを実装
 
 impl Add<usize> for VirtAddr {
     type Output = Self;
@@ -191,6 +207,7 @@ impl AddAssign<usize> for VirtAddr {
         };
     }
 }
+
 
 // safety: ptr must have been dropped with box::from_raw().
 pub unsafe trait PageAllocator: Sized {

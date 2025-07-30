@@ -21,11 +21,13 @@ members = [
     "src/kernel",
     "src/mkfs",
     "src/user",
-    "src/derive"
+    "src/macros"
 ]
 
 [workspace.dependencies]
-libkernel = { path = "src/kernel", default-features = false }
+octox_kernel = { path = "src/kernel", default-features = false }
+octox_macros = { path = "src/macros" }
 
 [dependencies]
-libkernel = { workspace = true, features = ["kernel"] }
+octox_kernel = { workspace = true, features = ["kernel"] }
+octox_macros = { workspace = true }
