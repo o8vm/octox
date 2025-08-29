@@ -3,7 +3,7 @@ use core::arch::naked_asm;
 // interrupts and exceptions while in supervisor mode come here.
 // push all registers, call kerneltrap(), restorem return.
 #[unsafe(naked)]
-#[repr(align(16))]
+#[rustc_align(16)]
 #[no_mangle]
 pub unsafe extern "C" fn kernelvec() -> ! {
     naked_asm!(
@@ -82,7 +82,7 @@ pub unsafe extern "C" fn kernelvec() -> ! {
 }
 
 #[unsafe(naked)]
-#[repr(align(16))] // if miss this alignment, a load access fault will occur.
+#[rustc_align(16)] // if miss this alignment, a load access fault will occur.
 #[no_mangle]
 pub unsafe extern "C" fn timervec() -> ! {
     // start.rs has set up the memory that mscratch points to:

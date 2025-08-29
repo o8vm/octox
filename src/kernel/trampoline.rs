@@ -18,7 +18,7 @@ extern "C" {
 #[link_section = "trampsec"]
 #[unsafe(naked)]
 #[no_mangle]
-#[repr(align(16))]
+#[rustc_align(16)]
 pub unsafe extern "C" fn uservec() -> ! {
     // trap.rs sets stvec to point here, so
     // traps from user space start here,
@@ -91,7 +91,7 @@ pub unsafe extern "C" fn uservec() -> ! {
 #[link_section = "trampsec"]
 #[unsafe(naked)]
 #[no_mangle]
-#[repr(align(16))]
+#[rustc_align(16)]
 pub unsafe extern "C" fn userret(pagetable: usize) -> ! {
     // userret(TRAPFLAME, pagetable)
     // called by usertrap_ret() in trap.rs to
