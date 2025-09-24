@@ -2,7 +2,7 @@ use crate::proc::Context;
 use core::arch::naked_asm;
 
 #[no_mangle]
-#[repr(align(16))]
+#[rustc_align(16)]
 #[unsafe(naked)]
 pub unsafe extern "C" fn swtch(old: &mut Context, new: &Context) {
     naked_asm!(
